@@ -1,0 +1,1 @@
+{"alphabet":["i","f"],"regex":"if","dfa":{"dfa":{"2":{},"0":{"i":1},"1":{"f":2}},"accepting_states":[2]}}
