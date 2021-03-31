@@ -3,13 +3,138 @@ use std::collections::{HashMap, HashSet};
 use std::env;
 use std::fmt;
 use std::fs;
+use std::fs::File;
+use std::io::{self, BufRead};
 use std::iter::FromIterator;
 use std::process;
+use std::str::FromStr;
 use std::time::Instant;
 
 /// Global variables
 /// the representation of the Epsilon character
 const EPSILON: char = '@';
+
+fn parse_cocol_file(path: &str, cat_table: &mut HashMap<String, Vec<char>>) {
+    let file = fs::read_to_string(path).unwrap();
+    let mut lines: Vec<&str> = file.split('\n').rev().collect();
+    let mut grammar_name = String::new();
+    // first token must be COMPILER
+    match lines.pop() {
+        Some(line) => {
+            let tokens: Vec<&str> = line.split(' ').collect();
+            if tokens.len() == 2 && tokens[0] == "COMPILER" {
+                grammar_name.push_str(tokens[1]);
+                println!("Grammar name: {}", grammar_name);
+            }
+        }
+        None => panic!("Invalid Cocol/R format."),
+    };
+
+    /* current section of file being processed
+       0 = COMPILER
+       1 = CHARACTERS
+       2 = KEYWORDS
+       3 = TOKENS
+       4 = PRODUCTIONS
+       5 = END
+    */
+    let mut section = 0;
+
+    let sections = vec![
+        "COMPILER",
+        "CHARACTERS",
+        "KEYWORDS",
+        "TOKENS",
+        "PRODUCTIONS",
+        "END",
+    ];
+
+    while !lines.is_empty() {
+        let line = lines.pop().unwrap();
+        let tokens: Vec<&str> = line.split(' ').collect();
+        // update file section
+        match sections.iter().position(|&s| s == tokens[0]) {
+            Some(pos) => {
+                section = pos;
+                continue;
+            }
+            None => (),
+        };
+        // process each section
+        if section == 1 {
+            // CHARACTERS
+            if tokens.len() == 3 {
+                if tokens[0].len() > 0 {
+                    println!("parsing category: {}", tokens[0]);
+
+                    let key = String::from_str(tokens[0]).unwrap();
+                    if !cat_table.contains_key(tokens[0]) {
+                        cat_table.insert(key.clone(), Vec::new());
+                    }
+
+                    let mut parsing_basic_set = false;
+                    let mut parsing_ident = false;
+                    let mut ident_vec = String::new();
+                    for c in tokens[2].chars() {
+                        println!("parsing char: {}", c);
+                        // basic set
+                        if c == '\"' && !parsing_basic_set && !parsing_ident {
+                            println!("starting to parse basic set...");
+                            parsing_basic_set = true;
+                            continue;
+                        }
+
+                        if c.is_ascii_alphanumeric() && !parsing_ident && !parsing_basic_set {
+                            parsing_ident = true;
+                            ident_vec.push(c);
+                            continue;
+                        }
+
+                        if parsing_basic_set {
+                            if c == '\"' {
+                                println!("finished parsing basic set...");
+                                parsing_basic_set = false;
+                                continue;
+                            }
+                            println!("table[{}] => pushing {}", tokens[0], c);
+                            cat_table.get_mut(&key).unwrap().push(c);
+                        } else if parsing_ident {
+                            if c.is_ascii_alphanumeric() {
+                                ident_vec.push(c);
+                            } else {
+                                println!("found ident {}", ident_vec);
+                                parsing_ident = false;
+                                let characters: Vec<char> = cat_table[&ident_vec].clone();
+                                // process operator
+                                if c == '+' {
+                                    // union
+                                    for c in characters {
+                                        cat_table.get_mut(&key).unwrap().push(c);
+                                    }
+                                } else if c == '-' {
+                                    // difference
+                                }
+                                ident_vec.clear();
+                            }
+                        }
+                    }
+                }
+            }
+        } else if section == 2 {
+            // KEYWORDS
+            println!("parsing keyword: {}", tokens[0]);
+        } else if section == 3 {
+            // TOKENS
+            println!("parsing token: {}", tokens[0]);
+        } else if section == 4 {
+            // PRODUCTIONS
+        } else if section == 5 {
+            if tokens[1] == grammar_name {
+                println!("Cocol/R file parsed successfully.");
+            }
+        }
+    }
+}
 
 /// Insert an explicit concatenation operator ('.') into the regular
 /// expression so parsing it is easier.
@@ -638,32 +763,41 @@ fn main() {
         process::exit(1);
     }
 
+    // categories table
+    let mut cat_table: HashMap<String, Vec<char>> = HashMap::new();
+
+    parse_cocol_file(&args[1], &mut cat_table);
+
+    for (key, value) in cat_table {
+        println!("{} => {:?}", key, value);
+    }
+
     // program arguments
-    let regex: &String = &args[1];
+    // let regex: &String = &args[1];
 
-    // replace '?' and '+' operators by the basic operators
-    let mut proc_regex = preprocess_regex(&regex);
-    // insert explicit concat operator into regex
-    proc_regex = regex_insert_concat_op(&proc_regex);
-    // build the extended regex used for the regex_dfa algorithm
-    let mut ex_proc_regex = proc_regex.clone();
-    ex_proc_regex.push_str(".#");
+    // // replace '?' and '+' operators by the basic operators
+    // let mut proc_regex = preprocess_regex(&regex);
+    // // insert explicit concat operator into regex
+    // proc_regex = regex_insert_concat_op(&proc_regex);
+    // // build the extended regex used for the regex_dfa algorithm
+    // let mut ex_proc_regex = proc_regex.clone();
+    // ex_proc_regex.push_str(".#");
 
-    // create the alphabet using the symbols in the regex
-    let mut letters = regex.clone();
-    letters.retain(|c| (is_valid_regex_symbol(&c) && c != EPSILON));
-    let alphabet: HashSet<char> = letters.chars().into_iter().collect();
+    // // create the alphabet using the symbols in the regex
+    // let mut letters = regex.clone();
+    // letters.retain(|c| (is_valid_regex_symbol(&c) && c != EPSILON));
+    // let alphabet: HashSet<char> = letters.chars().into_iter().collect();
 
-    // followpos table
-    let mut fp_table: HashMap<u32, HashSet<u32>> = HashMap::new();
-    let mut s_table: HashMap<char, HashSet<u32>> = HashMap::new();
-    let tree_root = parse_regex(&ex_proc_regex, &mut fp_table, &mut s_table);
+    // // followpos table
+    // let mut fp_table: HashMap<u32, HashSet<u32>> = HashMap::new();
+    // let mut s_table: HashMap<char, HashSet<u32>> = HashMap::new();
+    // let tree_root = parse_regex(&ex_proc_regex, &mut fp_table, &mut s_table);
 
-    // regex -> dfa
-    let direct_dfa = regex_dfa(&fp_table, &s_table, &tree_root, &alphabet);
+    // // regex -> dfa
+    // let direct_dfa = regex_dfa(&fp_table, &s_table, &tree_root, &alphabet);
 
-    // // direct
-    let ddfa_file = FAFile::new(alphabet.clone(), regex.to_string(), direct_dfa);
-    let serialized = serde_json::to_string(&ddfa_file).unwrap();
-    fs::write("./dfa.json", serialized).expect("Error writing to file.");
+    // // // direct
+    // let ddfa_file = FAFile::new(alphabet.clone(), regex.to_string(), direct_dfa);
+    // let serialized = serde_json::to_string(&ddfa_file).unwrap();
+    // fs::write("./dfa.json", serialized).expect("Error writing to file.");
 }
