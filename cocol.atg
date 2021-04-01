@@ -9,7 +9,8 @@ CHARACTERS
 letter = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ".
 digit = "0123456789".
 hexdigit = digit+"ABCDEF".
-noDigit = "ANY"-digit.
+nonZeroDigit = digit-"0".
+vowels = letter-"bcdfghjklmnpqrstvwxyzBCDFGHJKLMNPQRSTVWXYZ"
 
 KEYWORDS
 
@@ -18,9 +19,9 @@ while = "while".
 
 TOKENS
 
-id = letter{letter} EXCEPT KEYWORDS
+id = letter{letter|digit} EXCEPT KEYWORDS
 number = digit{digit}
-hexnumber = hexdigit{hexdigit}"(H)"
+hexnumber = "0x"hexdigit{hexdigit}
 
 PRODUCTIONS
 

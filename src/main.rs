@@ -14,7 +14,11 @@ use std::time::Instant;
 /// the representation of the Epsilon character
 const EPSILON: char = '@';
 
-fn parse_cocol_file(path: &str, cat_table: &mut HashMap<String, Vec<char>>) {
+fn parse_cocol_file(
+    path: &str,
+    cat_table: &mut HashMap<String, Vec<char>>,
+    tok_table: &mut HashMap<String, String>,
+) {
     let file = fs::read_to_string(path).unwrap();
     let mut lines: Vec<&str> = file.split('\n').rev().collect();
     let mut grammar_name = String::new();
@@ -31,15 +35,13 @@ fn parse_cocol_file(path: &str, cat_table: &mut HashMap<String, Vec<char>>) {
     };
 
     /* current section of file being processed
-       0 = COMPILER
-       1 = CHARACTERS
-       2 = KEYWORDS
-       3 = TOKENS
-       4 = PRODUCTIONS
-       5 = END
+        0 = COMPILER
+        1 = CHARACTERS
+        2 = KEYWORDS
+        3 = TOKENS
+        4 = PRODUCTIONS
+        5 = END
     */
-    let mut section = 0;
-
     let sections = vec![
         "COMPILER",
         "CHARACTERS",
@@ -48,6 +50,7 @@ fn parse_cocol_file(path: &str, cat_table: &mut HashMap<String, Vec<char>>) {
         "PRODUCTIONS",
         "END",
     ];
+    let mut section = 0;
 
     while !lines.is_empty() {
         let line = lines.pop().unwrap();
@@ -65,8 +68,6 @@ fn parse_cocol_file(path: &str, cat_table: &mut HashMap<String, Vec<char>>) {
             // CHARACTERS
             if tokens.len() == 3 {
                 if tokens[0].len() > 0 {
-                    println!("parsing category: {}", tokens[0]);
-
                     let key = String::from_str(tokens[0]).unwrap();
                     if !cat_table.contains_key(tokens[0]) {
                         cat_table.insert(key.clone(), Vec::new());
@@ -75,46 +76,85 @@ fn parse_cocol_file(path: &str, cat_table: &mut HashMap<String, Vec<char>>) {
                     let mut parsing_basic_set = false;
                     let mut parsing_ident = false;
                     let mut ident_vec = String::new();
+                    let mut final_set: Vec<char> = Vec::new();
+                    let mut curr_set: Vec<char> = Vec::new();
+                    let mut next_op: char = 0 as char;
                     for c in tokens[2].chars() {
-                        println!("parsing char: {}", c);
-                        // basic set
+                        // begin parsing basic set
                         if c == '\"' && !parsing_basic_set && !parsing_ident {
-                            println!("starting to parse basic set...");
                             parsing_basic_set = true;
                             continue;
                         }
-
+                        // begin parsing ident
                         if c.is_ascii_alphanumeric() && !parsing_ident && !parsing_basic_set {
                             parsing_ident = true;
                             ident_vec.push(c);
                             continue;
                         }
 
+                        // save next operator
+                        if c == '+' || c == '-' {
+                            next_op = c;
+                            if parsing_basic_set {
+                                parsing_basic_set = false;
+                                cat_table.insert(key.clone(), final_set.clone());
+                            } else if parsing_ident {
+                                parsing_ident = false;
+                                final_set.extend(cat_table[&ident_vec].clone());
+                                ident_vec.clear()
+                            }
+                            continue;
+                        }
+
                         if parsing_basic_set {
                             if c == '\"' {
-                                println!("finished parsing basic set...");
                                 parsing_basic_set = false;
-                                continue;
+                                if next_op == '+' {
+                                    // final_set UNION curr_set
+                                    final_set.extend(&curr_set);
+                                    cat_table.insert(key.clone(), final_set.clone());
+                                    next_op = 0 as char;
+                                } else if next_op == '-' {
+                                    // final_set DIFF curr_set
+                                    let s_0: HashSet<char> =
+                                        final_set.clone().into_iter().collect();
+                                    let s_1: HashSet<char> = curr_set.clone().into_iter().collect();
+                                    let v: Vec<char> = s_0.difference(&s_1).map(|c| *c).collect();
+                                    final_set.clear();
+                                    final_set.extend(&v);
+                                    // push
+                                    cat_table.insert(key.clone(), final_set.clone());
+                                    next_op = 0 as char;
+                                } else {
+                                    // push
+                                    cat_table.insert(key.clone(), curr_set.clone());
+                                }
+                            } else {
+                                curr_set.push(c);
                             }
-                            println!("table[{}] => pushing {}", tokens[0], c);
-                            cat_table.get_mut(&key).unwrap().push(c);
                         } else if parsing_ident {
                             if c.is_ascii_alphanumeric() {
                                 ident_vec.push(c);
                             } else {
-                                println!("found ident {}", ident_vec);
                                 parsing_ident = false;
-                                let characters: Vec<char> = cat_table[&ident_vec].clone();
-                                // process operator
-                                if c == '+' {
-                                    // union
-                                    for c in characters {
-                                        cat_table.get_mut(&key).unwrap().push(c);
-                                    }
-                                } else if c == '-' {
-                                    // difference
+                                curr_set.extend(cat_table[&ident_vec].clone());
+                                if next_op == '+' {
+                                    // final_set UNION curr_set
+                                    final_set.extend(&curr_set);
+                                    next_op = 0 as char;
+                                } else if next_op == '-' {
+                                    // final_set DIFF curr_set
+                                    let s_0: HashSet<char> =
+                                        final_set.clone().into_iter().collect();
+                                    let s_1: HashSet<char> = curr_set.clone().into_iter().collect();
+                                    let v: Vec<char> = s_0.intersection(&s_1).map(|c| *c).collect();
+                                    final_set.clear();
+                                    final_set.extend(&v);
+                                    next_op = 0 as char;
                                 }
+                                // reset state
                                 ident_vec.clear();
+                                continue;
                             }
                         }
                     }
@@ -122,10 +162,85 @@ fn parse_cocol_file(path: &str, cat_table: &mut HashMap<String, Vec<char>>) {
             }
         } else if section == 2 {
             // KEYWORDS
-            println!("parsing keyword: {}", tokens[0]);
+            if tokens.len() == 3 {
+                println!("parsing keyword: {:?}", tokens);
+                let mut token_string = String::new();
+                token_string.push('(');
+                for c in tokens[2].chars() {
+                    if c != '\"' && c != '.' {
+                        token_string.push_str(&format!("{}.", c));
+                    }
+                }
+                token_string.pop();
+                token_string.push(')');
+                tok_table.insert(String::from_str(tokens[0]).unwrap(), token_string);
+            }
         } else if section == 3 {
             // TOKENS
-            println!("parsing token: {}", tokens[0]);
+            if tokens.len() > 2 {
+                println!("parsing token: {:?}", tokens);
+                let mut char_stack = String::new();
+                let mut regex = String::from('(');
+                for i in 0..tokens[2].chars().count() {
+                    let c = tokens[2].chars().nth(i).unwrap();
+                    if c.is_ascii_alphanumeric() {
+                        // accumulate identifier
+                        char_stack.push(c);
+                    } else {
+                        if char_stack.is_empty() {
+                            if c == '(' || c == '{' || c == '[' || c == '\"' {
+                                regex.push('(');
+                            }
+                            continue;
+                        }
+                        // check if ident exists
+                        if cat_table.contains_key(&char_stack) {
+                            println!("\tfound ident: {:?}", char_stack);
+                            // get symbols from category table
+                            let symbols = cat_table[&char_stack].clone();
+                            regex.push('(');
+                            for s in symbols {
+                                regex.push_str(&format!("{}|", s));
+                            }
+                            // pop extra '|'
+                            regex.pop();
+                            // insert closing parentheses
+                            regex.push(')');
+
+                            // handle ident finish character
+                            if c == '{' {
+                                regex.push_str(".(");
+                            } else if c == '}' {
+                                regex.push_str(")*");
+                            } else if c == '[' {
+                                regex.push_str(".(");
+                            } else if c == ']' {
+                                regex.push_str(")?");
+                            } else if c == '(' {
+                                regex.push_str(".(");
+                            } else if c == ')' {
+                                regex.push(')');
+                            } else if c == '|' {
+                                regex.push('|');
+                            } else if c == '\"' {
+                                regex.push(')');
+                            }
+                        } else if c == '\"' {
+                            while !char_stack.is_empty() {
+                                regex.push_str(&format!("{}.", char_stack.remove(0)));
+                            }
+                            regex.pop();
+                            regex.push_str(").");
+                        }
+                        // TODO process EXCEPT
+
+                        // clear stack to get next ident
+                        char_stack.clear();
+                    }
+                }
+                regex.push(')');
+                tok_table.insert(String::from_str(tokens[0]).unwrap(), regex.clone());
+            }
         } else if section == 4 {
             // PRODUCTIONS
         } else if section == 5 {
@@ -765,17 +880,28 @@ fn main() {
 
     // categories table
     let mut cat_table: HashMap<String, Vec<char>> = HashMap::new();
+    // tokens table
+    let mut tok_table: HashMap<String, String> = HashMap::new();
 
-    parse_cocol_file(&args[1], &mut cat_table);
+    parse_cocol_file(&args[1], &mut cat_table, &mut tok_table);
 
+    println!("\n******************* Scanner Info ***********************");
+    println!("********************* CHARACTERS *************************");
     for (key, value) in cat_table {
         println!("{} => {:?}", key, value);
     }
+    println!("********************* TOKENS *************************");
+    let mut regex = String::from("(");
+    for (key, value) in tok_table {
+        regex.push_str(&format!("{}|", value));
+        println!("{} => {:?}", key, value);
+    }
+    regex.pop();
+    println!("****************** FINAL REGEX ***********************");
+    regex.push(')');
+    println!("{}", regex);
 
-    // program arguments
-    // let regex: &String = &args[1];
-
-    // // replace '?' and '+' operators by the basic operators
+    // replace '?' and '+' operators by the basic operators
     // let mut proc_regex = preprocess_regex(&regex);
     // // insert explicit concat operator into regex
     // proc_regex = regex_insert_concat_op(&proc_regex);
