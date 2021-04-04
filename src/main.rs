@@ -189,7 +189,7 @@ fn parse_cocol_file(
         } else if section == 2 {
             // KEYWORDS
             if tokens.len() == 3 {
-                println!("parsing keyword: {:?}", tokens);
+                // println!("parsing keyword: {:?}", tokens);
                 let mut keyword = String::from_str(tokens[2]).unwrap();
                 keyword.retain(|a| a != '.');
                 keywords.insert(keyword, String::from_str(tokens[0]).unwrap());
@@ -197,7 +197,7 @@ fn parse_cocol_file(
         } else if section == 3 {
             // TOKENS
             if tokens.len() > 2 {
-                println!("parsing token: {:?}", tokens);
+                // println!("parsing token: {:?}", tokens);
                 let mut char_stack = String::new();
                 let mut regex = String::from('(');
                 for i in 0..tokens[2].chars().count() {
@@ -214,7 +214,7 @@ fn parse_cocol_file(
                         }
                         // check if ident exists
                         if cat_table.contains_key(&char_stack) {
-                            println!("\tfound ident: {:?}", char_stack);
+                            // println!("\tfound ident: {:?}", char_stack);
                             // get symbols from category table
                             let symbols = cat_table[&char_stack].clone();
                             regex.push('(');
@@ -266,7 +266,7 @@ fn parse_cocol_file(
             // PRODUCTIONS
         } else if section == 5 {
             if tokens[1] == grammar_name {
-                println!("Cocol/R file parsed successfully.");
+                // println!("Cocol/R file parsed successfully.");
             }
         }
     }
@@ -869,37 +869,87 @@ fn regex_dfa(
     Dfa::new(dfa, d_acc_states)
 }
 
-fn simulate(
-    dfa: &Dfa,
-    accepting_states: &HashMap<u32, CocolToken>,
-    sentence: &String,
-) -> Vec<Token> {
-    let bytes: &[u8] = sentence.as_bytes();
+fn generate_code(filename: &str, dfa: &Dfa, accepting_states: &HashMap<u32, CocolToken>) {
+    let mut code = String::from(
+        "
+use std::collections::HashMap;
+use std::env;
+use std::process;
+use std::fs;
+
+#[derive(Debug, Clone)]
+struct Token {
+    name: String,
+    lexeme: String,
+}
+
+impl Token {
+    fn new(name: String, lexeme: String) -> Token {
+        Token { name, lexeme }
+    }
+}
+
+fn main() {
+    let args: Vec<String> = env::args().collect();
+    if args.len() < 2 {
+        println!(\"usage: ./rust-lex \\\"<file>\\\"\");
+        process::exit(1);
+    }
+    let file = fs::read_to_string(&args[1]).unwrap();
+    let mut dfa: HashMap<u32, HashMap<char, u32>> = HashMap::new();
+    let mut accepting_states: HashMap<u32, String> = HashMap::new();
+",
+    );
+    // build dfa
+    let mut first_time = true;
+    for (key, value) in &dfa.dfa {
+        if first_time {
+            code.push_str(&format!("dfa.insert({}, HashMap::new());", key));
+            first_time = false;
+        }
+        for (key_char, value_s) in value {
+            code.push_str(&format!(
+                "dfa.get_mut(&{}).unwrap().insert('{}', {});",
+                key, key_char, value_s
+            ));
+        }
+        first_time = true;
+    }
+
+    // accepting states
+    for (key, value) in accepting_states {
+        code.push_str(&format!(
+            "accepting_states.insert({}, String::from(\"{}\"));",
+            key, value.name
+        ));
+    }
+
+    // simulation code
+    code.push_str(
+        "
+    let bytes: &[u8] = file.as_bytes();
     let mut curr_idx = 0;
     let mut curr_state = 0;
     let mut states: Vec<u32> = Vec::new();
     let mut curr_lexeme = String::new();
     let mut found_tokens: Vec<Token> = Vec::new();
     while curr_idx < bytes.len() {
-        // move to the next state
         let curr_char = bytes[curr_idx] as char;
-        if dfa.dfa[&curr_state].contains_key(&curr_char) {
-            let next_state = dfa.dfa[&curr_state][&curr_char];
+        if dfa[&curr_state].contains_key(&curr_char) {
+            let next_state = dfa[&curr_state][&curr_char];
             curr_state = next_state;
             states.push(curr_state);
             curr_lexeme.push(curr_char);
             curr_idx += 1;
         }
-        // no match, we are in the ERROR STATE
         else if !states.is_empty() {
             while !states.is_empty() {
                 let top = states.pop().unwrap();
                 if accepting_states.contains_key(&top) {
                     found_tokens.push(Token::new(
-                        accepting_states[&top].name.clone(),
+                        accepting_states[&top].clone(),
                         curr_lexeme.clone(),
                     ));
-                    // reset state
                     curr_state = 0;
                     states.clear();
                     curr_lexeme.clear();
@@ -909,24 +959,12 @@ fn simulate(
             curr_idx += 1;
         }
     }
-
-    found_tokens
-}
-
-fn generate_code(filename: &str, dfa: &Dfa) {
-    let serialized_dfa = serde_json::to_string(&dfa).unwrap();
-    let code = String::from(&format!(
-        "
-use std::collections::HashMap;
-use serde::Deserialize;
-
-fn main() {{
-    let dfa: Dfa = serde_json::from_str(\"{}\").unwrap();
-    println!(\"{{:?}}\", dfa);
-}}
+    for token in found_tokens {
+        println!(\"Token {:?}\", token);
+    }
     ",
-        serialized_dfa
-    ));
+    );
+    code.push('}');
     fs::write(filename, code).expect(&format!("Error writing file: {}.", filename));
 }
 
@@ -955,27 +993,27 @@ fn main() {
         &mut tokens,
     );
 
-    println!("\n******************* Scanner Info ***********************");
-    println!("********************* CHARACTERS *************************");
-    for (key, value) in cat_table {
-        println!("{} => {:?}", key, value);
-    }
-    println!("********************* KEYWORDS *************************");
-    for (key, value) in keywords {
-        println!("{} => {}", key, value);
-    }
-    println!("********************* TOKENS *************************");
+    // println!("\n******************* Scanner Info ***********************");
+    // println!("********************* CHARACTERS *************************");
+    // for (key, value) in cat_table {
+    //     println!("{} => {:?}", key, value);
+    // }
+    // println!("********************* KEYWORDS *************************");
+    // for (key, value) in keywords {
+    //     println!("{} => {}", key, value);
+    // }
+    // println!("********************* TOKENS *************************");
     let mut regex = String::from("(");
     for token in &tokens {
         regex.push_str(&format!("{}|", token.regex));
-        println!("{:?}", token);
+        // println!("{:?}", token);
     }
     regex.pop();
-    println!("****************** FINAL REGEX ***********************");
+    // println!("****************** FINAL REGEX ***********************");
     regex.push(')');
     // replace '?' and '+' operators by the basic operators
     let proc_regex = preprocess_regex(&regex);
-    println!("{}", proc_regex);
+    // println!("{}", proc_regex);
     // create the alphabet using the symbols in the regex
     let mut letters = regex.clone();
     letters.retain(|c| (is_valid_regex_symbol(&c) && c != EPSILON));
@@ -998,24 +1036,6 @@ fn main() {
     );
 
     // code generation
-    generate_code("rust-lex.rs", &direct_dfa);
+    generate_code("rust-lex.rs", &direct_dfa, &tokens_accepting_states);
     println!("File rust-lex.rs written correctly.");
-
-    // println!("****************** FINAL ACCEPTING STATES ***********************");
-    // for (key, value) in &tokens_accepting_states {
-    //     println!("{} => {:?}", key, value);
-    // }
-
-    // println!("\n****************** SIMULATION ***********************");
-    // let sentence = String::from("var = 123; hex = 0xFF;");
-    // println!("Simulating sentence: {}", sentence);
-    // let tokens = simulate(&direct_dfa, &tokens_accepting_states, &sentence);
-    // for token in tokens {
-    //     println!("Found token: {:?}", token);
-    // }
-
-    // direct
-    // let ddfa_file = FAFile::new(alphabet.clone(), regex.to_string(), direct_dfa);
-    // let serialized = serde_json::to_string(&ddfa_file).unwrap();
-    // fs::write("./dfa.json", serialized).expect("Error writing to file.");
 }
