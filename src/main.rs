@@ -1,4 +1,4 @@
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 use std::env;
 use std::fmt;
@@ -14,10 +14,37 @@ use std::time::Instant;
 /// the representation of the Epsilon character
 const EPSILON: char = '@';
 
+/// AST node representation
+#[derive(Debug, Clone)]
+struct CocolToken {
+    name: String,
+    regex: String,
+}
+
+impl CocolToken {
+    fn new(name: String, regex: String) -> CocolToken {
+        CocolToken { name, regex }
+    }
+}
+
+#[derive(Debug, Clone)]
+struct Token {
+    name: String,
+    lexeme: String,
+}
+
+impl Token {
+    fn new(name: String, lexeme: String) -> Token {
+        Token { name, lexeme }
+    }
+}
+
 fn parse_cocol_file(
     path: &str,
     cat_table: &mut HashMap<String, Vec<char>>,
+    keywords: &mut HashMap<String, String>,
     tok_table: &mut HashMap<String, String>,
+    tokens_vec: &mut Vec<CocolToken>,
 ) {
     let file = fs::read_to_string(path).unwrap();
     let mut lines: Vec<&str> = file.split('\n').rev().collect();
@@ -28,7 +55,6 @@ fn parse_cocol_file(
             let tokens: Vec<&str> = line.split(' ').collect();
             if tokens.len() == 2 && tokens[0] == "COMPILER" {
                 grammar_name.push_str(tokens[1]);
-                println!("Grammar name: {}", grammar_name);
             }
         }
         None => panic!("Invalid Cocol/R format."),
@@ -164,16 +190,9 @@ fn parse_cocol_file(
             // KEYWORDS
             if tokens.len() == 3 {
                 println!("parsing keyword: {:?}", tokens);
-                let mut token_string = String::new();
-                token_string.push('(');
-                for c in tokens[2].chars() {
-                    if c != '\"' && c != '.' {
-                        token_string.push_str(&format!("{}.", c));
-                    }
-                }
-                token_string.pop();
-                token_string.push(')');
-                tok_table.insert(String::from_str(tokens[0]).unwrap(), token_string);
+                let mut keyword = String::from_str(tokens[2]).unwrap();
+                keyword.retain(|a| a != '.');
+                keywords.insert(keyword, String::from_str(tokens[0]).unwrap());
             }
         } else if section == 3 {
             // TOKENS
@@ -238,8 +257,10 @@ fn parse_cocol_file(
                         char_stack.clear();
                     }
                 }
+                regex.push_str(".#");
                 regex.push(')');
                 tok_table.insert(String::from_str(tokens[0]).unwrap(), regex.clone());
+                tokens_vec.push(CocolToken::new(String::from_str(tokens[0]).unwrap(), regex));
             }
         } else if section == 4 {
             // PRODUCTIONS
@@ -251,24 +272,19 @@ fn parse_cocol_file(
     }
 }
 
-/// Insert an explicit concatenation operator ('.') into the regular
-/// expression so parsing it is easier.
-fn regex_insert_concat_op(regex: &String) -> String {
-    let mut new_regex = String::new();
-    let bytes = regex.as_bytes();
-    new_regex.push(bytes[0] as char);
-    for i in 1..bytes.len() {
-        let prev = bytes[i - 1] as char;
-        let curr = bytes[i] as char;
-        if is_valid_regex_symbol(&prev) || prev == '*' || prev == ')' {
-            if is_valid_regex_symbol(&curr) || curr == '#' || curr == '(' {
-                new_regex.push('.');
-            }
-        }
-        new_regex.push(curr);
+/// Is the char an operator?
+fn is_op(c: char) -> bool {
+    match c {
+        '*' => true,
+        '.' => true,
+        '|' => true,
+        _ => false,
     }
+}
 
-    new_regex
+/// Is the char valid in our regular expressions?
+fn is_valid_regex_symbol(c: &char) -> bool {
+    c.is_ascii_alphanumeric() || *c == '#' || *c == EPSILON
 }
 
 /// Process the extension operators of regexes:
@@ -336,38 +352,6 @@ fn preprocess_regex(regex: &String) -> String {
         }
     }
     new_regex
-}
-
-/// Is the char an operator?
-fn is_op(c: char) -> bool {
-    match c {
-        '*' => true,
-        '.' => true,
-        '|' => true,
-        _ => false,
-    }
-}
-
-/// Is the char valid in our regular expressions?
-fn is_valid_regex_symbol(c: &char) -> bool {
-    c.is_ascii_alphanumeric() || *c == '#' || *c == EPSILON
-}
-
-/// Depth first traversal, printing the information of each node.
-/// Used during development for debugging.
-fn depth_first_debug(root: &Node) {
-    match &root.left {
-        Some(n) => depth_first_debug(&n),
-        _ => (),
-    }
-    match &root.right {
-        Some(n) => depth_first_debug(&n),
-        _ => (),
-    }
-    println!(
-        "symbol: {} | pos: {} | nullable: {} | firstpos: {:?} | lastpos: {:?}",
-        root.symbol, root.position, root.nullable, root.firstpos, root.lastpos
-    );
 }
 
 /// AST node representation
@@ -501,7 +485,7 @@ impl Node {
 }
 
 /// DFA representation
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, Deserialize)]
 struct Dfa {
     /// The transition table of this `Dfa`.
     dfa: HashMap<u32, HashMap<char, u32>>,
@@ -580,7 +564,7 @@ impl FAFile {
 fn parse_regex(
     regex: &String,
     fp_table: &mut HashMap<u32, HashSet<u32>>,
-    s_table: &mut HashMap<char, HashSet<u32>>,
+    pos_table: &mut HashMap<char, HashSet<u32>>,
 ) -> Node {
     // holds nodes
     let mut tree_stack: Vec<Node> = Vec::new();
@@ -612,10 +596,10 @@ fn parse_regex(
                 // lastpos of a symbol node is only its position
                 n.lastpos = hs;
                 // update s_table to save this char position in the tree
-                if !s_table.contains_key(&c) {
-                    s_table.insert(c, HashSet::new());
+                if !pos_table.contains_key(&c) {
+                    pos_table.insert(c, HashSet::new());
                 }
-                s_table.get_mut(&c).unwrap().insert(n.position);
+                pos_table.get_mut(&c).unwrap().insert(n.position);
             } else {
                 n.nullable = true;
             }
@@ -790,6 +774,8 @@ fn parse_regex(
 fn regex_dfa(
     fp_table: &HashMap<u32, HashSet<u32>>,
     s_table: &HashMap<char, HashSet<u32>>,
+    tokens: &Vec<CocolToken>,
+    tokens_accepting_states: &mut HashMap<u32, CocolToken>,
     root: &Node,
     alphabet: &HashSet<char>,
 ) -> Dfa {
@@ -799,6 +785,10 @@ fn regex_dfa(
     let mut d_states_map: HashMap<Vec<u32>, u32> = HashMap::new();
     let mut unmarked: Vec<Vec<u32>> = Vec::new();
     let mut curr_state = 0;
+
+    // TODO think of better implementation
+    let mut hashtag_positions: Vec<u32> = s_table[&'#'].clone().into_iter().collect();
+    hashtag_positions.sort();
 
     // push start state, it is firstpos of the root of the tree
     let mut start_state: Vec<u32> = root.firstpos.clone().into_iter().collect();
@@ -857,15 +847,87 @@ fn regex_dfa(
                     .insert(*a, d_states_map[&u_vec]);
             }
             // check if U is an accepting state
-            if u.intersection(&s_table[&'#']).count() > 0 {
+            let intersection = u.intersection(&s_table[&'#']);
+            let count = intersection.clone().count();
+            if count > 0 {
                 if !d_acc_states.contains(&d_states_map[&u_vec]) {
-                    d_acc_states.push(d_states_map[&u_vec]);
+                    let state_num = d_states_map[&u_vec];
+                    d_acc_states.push(state_num);
+                    let mut inter_vec: Vec<u32> = intersection.into_iter().map(|a| *a).collect();
+                    inter_vec.sort();
+                    let hash_pos = hashtag_positions
+                        .iter()
+                        .position(|&a| a == inter_vec[0])
+                        .unwrap();
+                    let token = tokens[hash_pos].clone();
+                    tokens_accepting_states.insert(state_num, token);
                 }
             }
         }
     }
 
     Dfa::new(dfa, d_acc_states)
+}
+
+fn simulate(
+    dfa: &Dfa,
+    accepting_states: &HashMap<u32, CocolToken>,
+    sentence: &String,
+) -> Vec<Token> {
+    let bytes: &[u8] = sentence.as_bytes();
+    let mut curr_idx = 0;
+    let mut curr_state = 0;
+    let mut states: Vec<u32> = Vec::new();
+    let mut curr_lexeme = String::new();
+    let mut found_tokens: Vec<Token> = Vec::new();
+    while curr_idx < bytes.len() {
+        // move to the next state
+        let curr_char = bytes[curr_idx] as char;
+        if dfa.dfa[&curr_state].contains_key(&curr_char) {
+            let next_state = dfa.dfa[&curr_state][&curr_char];
+            curr_state = next_state;
+            states.push(curr_state);
+            curr_lexeme.push(curr_char);
+            curr_idx += 1;
+        }
+        // no match, we are in the ERROR STATE
+        else if !states.is_empty() {
+            while !states.is_empty() {
+                let top = states.pop().unwrap();
+                if accepting_states.contains_key(&top) {
+                    found_tokens.push(Token::new(
+                        accepting_states[&top].name.clone(),
+                        curr_lexeme.clone(),
+                    ));
+                    // reset state
+                    curr_state = 0;
+                    states.clear();
+                    curr_lexeme.clear();
+                }
+            }
+        } else {
+            curr_idx += 1;
+        }
+    }
+
+    found_tokens
+}
+
+fn generate_code(filename: &str, dfa: &Dfa) {
+    let serialized_dfa = serde_json::to_string(&dfa).unwrap();
+    let code = String::from(&format!(
+        "
+use std::collections::HashMap;
+use serde::Deserialize;
+
+fn main() {{
+    let dfa: Dfa = serde_json::from_str(\"{}\").unwrap();
+    println!(\"{{:?}}\", dfa);
+}}
+    ",
+        serialized_dfa
+    ));
+    fs::write(filename, code).expect(&format!("Error writing file: {}.", filename));
 }
 
 // *********************************************** Main ***********************************************
@@ -880,49 +942,79 @@ fn main() {
 
     // categories table
     let mut cat_table: HashMap<String, Vec<char>> = HashMap::new();
-    // tokens table
     let mut tok_table: HashMap<String, String> = HashMap::new();
+    let mut keywords: HashMap<String, String> = HashMap::new();
+    let mut tokens: Vec<CocolToken> = Vec::new();
 
-    parse_cocol_file(&args[1], &mut cat_table, &mut tok_table);
+    // parse cocol file and update data structures
+    parse_cocol_file(
+        &args[1],
+        &mut cat_table,
+        &mut keywords,
+        &mut tok_table,
+        &mut tokens,
+    );
 
     println!("\n******************* Scanner Info ***********************");
     println!("********************* CHARACTERS *************************");
     for (key, value) in cat_table {
         println!("{} => {:?}", key, value);
     }
+    println!("********************* KEYWORDS *************************");
+    for (key, value) in keywords {
+        println!("{} => {}", key, value);
+    }
     println!("********************* TOKENS *************************");
     let mut regex = String::from("(");
-    for (key, value) in tok_table {
-        regex.push_str(&format!("{}|", value));
-        println!("{} => {:?}", key, value);
+    for token in &tokens {
+        regex.push_str(&format!("{}|", token.regex));
+        println!("{:?}", token);
     }
     regex.pop();
     println!("****************** FINAL REGEX ***********************");
     regex.push(')');
-    println!("{}", regex);
-
     // replace '?' and '+' operators by the basic operators
-    // let mut proc_regex = preprocess_regex(&regex);
-    // // insert explicit concat operator into regex
-    // proc_regex = regex_insert_concat_op(&proc_regex);
-    // // build the extended regex used for the regex_dfa algorithm
-    // let mut ex_proc_regex = proc_regex.clone();
-    // ex_proc_regex.push_str(".#");
+    let proc_regex = preprocess_regex(&regex);
+    println!("{}", proc_regex);
+    // create the alphabet using the symbols in the regex
+    let mut letters = regex.clone();
+    letters.retain(|c| (is_valid_regex_symbol(&c) && c != EPSILON));
+    let alphabet: HashSet<char> = letters.chars().into_iter().collect();
 
-    // // create the alphabet using the symbols in the regex
-    // let mut letters = regex.clone();
-    // letters.retain(|c| (is_valid_regex_symbol(&c) && c != EPSILON));
-    // let alphabet: HashSet<char> = letters.chars().into_iter().collect();
+    // followpos table
+    let mut fp_table: HashMap<u32, HashSet<u32>> = HashMap::new();
+    let mut pos_table: HashMap<char, HashSet<u32>> = HashMap::new();
+    let tree_root = parse_regex(&proc_regex, &mut fp_table, &mut pos_table);
 
-    // // followpos table
-    // let mut fp_table: HashMap<u32, HashSet<u32>> = HashMap::new();
-    // let mut s_table: HashMap<char, HashSet<u32>> = HashMap::new();
-    // let tree_root = parse_regex(&ex_proc_regex, &mut fp_table, &mut s_table);
+    // regex -> dfa
+    let mut tokens_accepting_states: HashMap<u32, CocolToken> = HashMap::new();
+    let direct_dfa = regex_dfa(
+        &fp_table,
+        &pos_table,
+        &tokens,
+        &mut tokens_accepting_states,
+        &tree_root,
+        &alphabet,
+    );
 
-    // // regex -> dfa
-    // let direct_dfa = regex_dfa(&fp_table, &s_table, &tree_root, &alphabet);
+    // code generation
+    generate_code("rust-lex.rs", &direct_dfa);
+    println!("File rust-lex.rs written correctly.");
 
-    // // // direct
+    // println!("****************** FINAL ACCEPTING STATES ***********************");
+    // for (key, value) in &tokens_accepting_states {
+    //     println!("{} => {:?}", key, value);
+    // }
+
+    // println!("\n****************** SIMULATION ***********************");
+    // let sentence = String::from("var = 123; hex = 0xFF;");
+    // println!("Simulating sentence: {}", sentence);
+    // let tokens = simulate(&direct_dfa, &tokens_accepting_states, &sentence);
+    // for token in tokens {
+    //     println!("Found token: {:?}", token);
+    // }
+
+    // direct
     // let ddfa_file = FAFile::new(alphabet.clone(), regex.to_string(), direct_dfa);
     // let serialized = serde_json::to_string(&ddfa_file).unwrap();
     // fs::write("./dfa.json", serialized).expect("Error writing to file.");
