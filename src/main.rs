@@ -80,7 +80,8 @@ fn parse_cocol_file(
 
     while !lines.is_empty() {
         let line = lines.pop().unwrap();
-        let tokens: Vec<&str> = line.split(' ').collect();
+        let tokens: Vec<&str> = line.splitn(2, '=').collect();
+        println!("tokens: {:?}", tokens);
         // update file section
         match sections.iter().position(|&s| s == tokens[0]) {
             Some(pos) => {
@@ -92,29 +93,41 @@ fn parse_cocol_file(
         // process each section
         if section == 1 {
             // CHARACTERS
-            if tokens.len() == 3 {
+            if tokens.len() > 1 {
                 if tokens[0].len() > 0 {
-                    let key = String::from_str(tokens[0]).unwrap();
-                    if !cat_table.contains_key(tokens[0]) {
+                    let key = String::from_str(tokens[0].trim_end()).unwrap();
+                    if !cat_table.contains_key(&key) {
                         cat_table.insert(key.clone(), Vec::new());
                     }
 
                     let mut parsing_basic_set = false;
                     let mut parsing_ident = false;
+                    let mut parsing_char = false;
                     let mut ident_vec = String::new();
                     let mut final_set: Vec<char> = Vec::new();
                     let mut curr_set: Vec<char> = Vec::new();
                     let mut next_op: char = 0 as char;
-                    for c in tokens[2].chars() {
+                    let mut char_integer = String::new();
+
+                    // loop through each char
+                    let mut char_index = 0;
+                    while char_index < tokens[1].chars().count() {
+                        let c: char = tokens[1].chars().nth(char_index).unwrap();
                         // begin parsing basic set
-                        if c == '\"' && !parsing_basic_set && !parsing_ident {
+                        if c == '\"' && !parsing_basic_set && !parsing_ident && !parsing_char {
                             parsing_basic_set = true;
+                            char_index += 1;
                             continue;
                         }
                         // begin parsing ident
-                        if c.is_ascii_alphanumeric() && !parsing_ident && !parsing_basic_set {
+                        if c.is_ascii_alphanumeric()
+                            && !parsing_ident
+                            && !parsing_basic_set
+                            && !parsing_char
+                        {
                             parsing_ident = true;
                             ident_vec.push(c);
+                            char_index += 1;
                             continue;
                         }
 
@@ -129,6 +142,7 @@ fn parse_cocol_file(
                                 final_set.extend(cat_table[&ident_vec].clone());
                                 ident_vec.clear()
                             }
+                            char_index += 1;
                             continue;
                         }
 
@@ -163,6 +177,14 @@ fn parse_cocol_file(
                                 ident_vec.push(c);
                             } else {
                                 parsing_ident = false;
+                                if ident_vec == "CHR" {
+                                    println!("found a CHR()");
+                                    ident_vec.clear();
+                                    parsing_char = true;
+                                    char_index += 1;
+                                    continue;
+                                }
+
                                 curr_set.extend(cat_table[&ident_vec].clone());
                                 if next_op == '+' {
                                     // final_set UNION curr_set
@@ -182,26 +204,67 @@ fn parse_cocol_file(
                                 ident_vec.clear();
                                 continue;
                             }
+                        } else if parsing_char {
+                            if c == ')' {
+                                parsing_char = false;
+                                let char_int = char_integer.parse::<u8>().unwrap();
+                                println!("Ending char integer parse: {}", char_int as char);
+                                if (tokens[1].chars().count() - char_index > 6)
+                                    && tokens[1].chars().nth(char_index + 1).unwrap() == '.'
+                                    && tokens[1].chars().nth(char_index + 2).unwrap() == '.'
+                                    && tokens[1].chars().nth(char_index + 3).unwrap() == 'C'
+                                    && tokens[1].chars().nth(char_index + 4).unwrap() == 'H'
+                                    && tokens[1].chars().nth(char_index + 5).unwrap() == 'R'
+                                    && tokens[1].chars().nth(char_index + 6).unwrap() == '('
+                                {
+                                    let mut int_stack = String::new();
+                                    char_index += 7;
+                                    while tokens[1].chars().nth(char_index).unwrap() != ')' {
+                                        int_stack.push(tokens[1].chars().nth(char_index).unwrap());
+                                        char_index += 1;
+                                    }
+                                    let range_end: u8 = int_stack.parse::<u8>().unwrap();
+                                    if range_end < char_int {
+                                        println!("Error processing CHR range: range end is less than range start.");
+                                        process::exit(1);
+                                    }
+                                    for i in char_int..range_end {
+                                        final_set.push(i as char);
+                                    }
+                                    println!(
+                                        "Found char range, from {} to {}",
+                                        char_int, range_end
+                                    );
+                                } else {
+                                    // parse single char
+                                    final_set.push(char_int as char);
+                                }
+                                cat_table.insert(key.clone(), final_set.clone());
+                                continue;
+                            }
+                            char_integer.push(c);
                         }
+                        // next char
+                        char_index += 1;
                     }
                 }
             }
         } else if section == 2 {
             // KEYWORDS
-            if tokens.len() == 3 {
+            if tokens.len() == 2 {
                 // println!("parsing keyword: {:?}", tokens);
-                let mut keyword = String::from_str(tokens[2]).unwrap();
+                let mut keyword = String::from_str(tokens[1]).unwrap();
                 keyword.retain(|a| a != '.');
                 keywords.insert(keyword, String::from_str(tokens[0]).unwrap());
             }
         } else if section == 3 {
             // TOKENS
-            if tokens.len() > 2 {
+            if tokens.len() > 1 {
                 // println!("parsing token: {:?}", tokens);
                 let mut char_stack = String::new();
                 let mut regex = String::from('(');
-                for i in 0..tokens[2].chars().count() {
-                    let c = tokens[2].chars().nth(i).unwrap();
+                for i in 0..tokens[1].chars().count() {
+                    let c = tokens[1].chars().nth(i).unwrap();
                     if c.is_ascii_alphanumeric() {
                         // accumulate identifier
                         char_stack.push(c);
@@ -214,7 +277,6 @@ fn parse_cocol_file(
                         }
                         // check if ident exists
                         if cat_table.contains_key(&char_stack) {
-                            // println!("\tfound ident: {:?}", char_stack);
                             // get symbols from category table
                             let symbols = cat_table[&char_stack].clone();
                             regex.push('(');
@@ -993,27 +1055,27 @@ fn main() {
         &mut tokens,
     );
 
-    // println!("\n******************* Scanner Info ***********************");
-    // println!("********************* CHARACTERS *************************");
-    // for (key, value) in cat_table {
-    //     println!("{} => {:?}", key, value);
-    // }
-    // println!("********************* KEYWORDS *************************");
-    // for (key, value) in keywords {
-    //     println!("{} => {}", key, value);
-    // }
-    // println!("********************* TOKENS *************************");
+    println!("\n******************* Scanner Info ***********************");
+    println!("********************* CHARACTERS *************************");
+    for (key, value) in cat_table {
+        println!("{} => {:?}", key, value);
+    }
+    println!("********************* KEYWORDS *************************");
+    for (key, value) in keywords {
+        println!("{} => {}", key, value);
+    }
+    println!("********************* TOKENS *************************");
     let mut regex = String::from("(");
     for token in &tokens {
         regex.push_str(&format!("{}|", token.regex));
-        // println!("{:?}", token);
+        println!("{:?}", token);
     }
     regex.pop();
-    // println!("****************** FINAL REGEX ***********************");
+    println!("****************** FINAL REGEX ***********************");
     regex.push(')');
     // replace '?' and '+' operators by the basic operators
     let proc_regex = preprocess_regex(&regex);
-    // println!("{}", proc_regex);
+    println!("{}", proc_regex);
     // create the alphabet using the symbols in the regex
     let mut letters = regex.clone();
     letters.retain(|c| (is_valid_regex_symbol(&c) && c != EPSILON));

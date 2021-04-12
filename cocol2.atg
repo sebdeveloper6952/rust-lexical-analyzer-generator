@@ -6,13 +6,12 @@ COMPILER example
 
 CHARACTERS
 
-letter = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ".
-digit = "0123456789".
-hexdigit = digit+"ABCDEF".
+letter       = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ".
+digit        = "0123456789".
+hexdigit     = digit+"ABCDEF".
 nonZeroDigit = digit-"0".
-vowels = letter-"bcdfghjklmnpqrstvwxyzBCDFGHJKLMNPQRSTVWXYZ".
-specials = CHR(33)..CHR(47).
-tab = CHR(9).
+vowels       = letter-"bcdfghjklmnpqrstvwxyzBCDFGHJKLMNPQRSTVWXYZ".
+tab          = CHR(9) .
 
 KEYWORDS
 
@@ -24,6 +23,8 @@ TOKENS
 id = letter{letter|digit} EXCEPT KEYWORDS.
 integer = nonZeroDigit{digit}.
 hexnumber = "0x"hexdigit{hexdigit}.
+
+IGNORE tab + eol + CHR(13)
 
 PRODUCTIONS
 
