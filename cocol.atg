@@ -6,13 +6,14 @@ COMPILER example
 
 CHARACTERS
 
-letter = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ".
+letter = "a"+"bcdefghijklmnopqrstuvwxyz"+"ABCDEFGHIJKLMNOPQRSTUVWXYZ".
 digit = "0123456789".
 hexdigit = digit+"ABCDEF".
 nonZeroDigit = digit-"0".
 vowels = letter-"bcdfghjklmnpqrstvwxyzBCDFGHJKLMNPQRSTVWXYZ".
-specials = CHR(33)..CHR(47).
+specials = 'a'+CHR(33)..CHR(47)+'b'.
 tab = CHR(9).
+charTest = 's'.
 
 KEYWORDS
 
