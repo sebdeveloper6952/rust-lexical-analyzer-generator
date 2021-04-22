@@ -9,6 +9,7 @@ use std::str::FromStr;
 /// Global variables
 /// the representation of the Epsilon character
 const EPSILON: char = '@';
+const CONCAT_CHAR: char = 31 as char;
 
 /// AST node representation
 #[derive(Debug, Clone)]
@@ -347,8 +348,9 @@ fn parse_cocol_file(
                         regex.push('(');
                         while sentence.chars().nth(char_index).unwrap() != '\"' {
                             regex.push_str(&format!(
-                                "{}.",
-                                sentence.chars().nth(char_index).unwrap()
+                                "{}{}",
+                                sentence.chars().nth(char_index).unwrap(),
+                                CONCAT_CHAR
                             ));
                             char_index += 1;
                         }
@@ -384,14 +386,16 @@ fn parse_cocol_file(
                     }
 
                     c = sentence.chars().nth(char_index).unwrap();
-                    if c == ' ' || c == '{' || c == '[' || c == '(' || c == '\'' || c == '\"' {
-                        regex.push_str(".(");
+                    if c == ' ' || c == '{' || c == '[' || c == '(' {
+                        regex.push_str(&format!("{}(", CONCAT_CHAR));
+                    } else if c == '\'' || c == '\"' {
+                        regex.push(CONCAT_CHAR);
                     } else if c == '}' {
-                        regex.push_str(")*.");
+                        regex.push_str(&format!(")*{}", CONCAT_CHAR));
                     } else if c == ']' {
-                        regex.push_str(")?.");
+                        regex.push_str(&format!(")?{}", CONCAT_CHAR));
                     } else if c == ')' {
-                        regex.push_str(").");
+                        regex.push_str(&format!("){}", CONCAT_CHAR));
                     } else if c == '|' {
                         regex.push('|');
                     }
@@ -399,7 +403,13 @@ fn parse_cocol_file(
 
                     // TODO process the last '.' of each token declaration
                 }
-                regex.push_str("#");
+                let last = regex.pop().unwrap();
+                if last == CONCAT_CHAR {
+                    regex.push_str(&format!("{}#", CONCAT_CHAR));
+                } else {
+                    regex.push_str(&format!("{}{}#", last, CONCAT_CHAR));
+                }
+                // regex.push_str("#");
                 regex.push(')');
                 tok_table.insert(String::from_str(tokens[0]).unwrap(), regex.clone());
                 tokens_vec.push(CocolToken::new(
@@ -424,7 +434,7 @@ fn parse_cocol_file(
 fn is_op(c: char) -> bool {
     match c {
         '*' => true,
-        '.' => true,
+        CONCAT_CHAR => true,
         '|' => true,
         _ => false,
     }
@@ -432,7 +442,7 @@ fn is_op(c: char) -> bool {
 
 /// Is the char valid in our regular expressions?
 fn is_valid_regex_symbol(c: &char) -> bool {
-    c.is_ascii_alphanumeric() || *c == '#' || *c == EPSILON || *c == '\'' || *c == '\"'
+    c.is_ascii_alphanumeric() || *c == '#' || *c == EPSILON || *c == '\'' || *c == '\"' || *c == '.'
 }
 
 /// Process the extension operators of regexes:
@@ -571,7 +581,7 @@ impl Node {
     /// children.
     fn new_concat_node(left: Node, right: Node) -> Node {
         // new node instance
-        let mut new_node = Node::new('.', 0, false);
+        let mut new_node = Node::new(CONCAT_CHAR, 0, false);
         // compute and set nullable
         new_node.nullable = left.nullable && right.nullable;
         // compute firstpos
@@ -698,7 +708,7 @@ fn parse_regex(
     // populate precedences
     precedences.insert('(', 0);
     precedences.insert('|', 1);
-    precedences.insert('.', 2);
+    precedences.insert(CONCAT_CHAR, 2);
     precedences.insert('*', 3);
 
     // for each char in the regex
@@ -752,7 +762,7 @@ fn parse_regex(
                     let right = tree_stack.pop().unwrap();
                     let left = tree_stack.pop().unwrap();
                     n = Node::new_union_node(left, right);
-                } else if op == '.' {
+                } else if op == CONCAT_CHAR {
                     let right = tree_stack.pop().unwrap();
                     let left = tree_stack.pop().unwrap();
                     // update followpos table
@@ -795,7 +805,7 @@ fn parse_regex(
                     let right = tree_stack.pop().unwrap();
                     let left = tree_stack.pop().unwrap();
                     n = Node::new_union_node(left, right);
-                } else if top_op == '.' {
+                } else if top_op == CONCAT_CHAR {
                     let right = tree_stack.pop().unwrap();
                     let left = tree_stack.pop().unwrap();
                     // update followpos table
@@ -844,7 +854,7 @@ fn parse_regex(
             let right = tree_stack.pop().unwrap();
             let left = tree_stack.pop().unwrap();
             n = Node::new_union_node(left, right);
-        } else if top_op == '.' {
+        } else if top_op == CONCAT_CHAR {
             let right = tree_stack.pop().unwrap();
             let left = tree_stack.pop().unwrap();
             // update followpos table
@@ -1026,7 +1036,6 @@ fn main() {
     let file = fs::read_to_string(&args[1]).unwrap();
     let mut dfa:  HashMap<u32, HashMap<u8, u32>> = HashMap::new();
     let mut accepting_states: HashMap<u32, String> = HashMap::new();
-    let mut keywords: HashMap<String, String> = HashMap::new();
 ",
     );
 
@@ -1055,12 +1064,15 @@ fn main() {
     }
 
     // keywords
-    for (key, value) in keywords {
-        code.push_str(&format!(
-            "keywords.insert(String::from({}), String::from(\"{}\"));",
-            key,
-            value.trim()
-        ));
+    if keywords.len() > 0 {
+        code.push_str("let mut keywords: HashMap<String, String> = HashMap::new();");
+        for (key, value) in keywords {
+            code.push_str(&format!(
+                "keywords.insert(String::from({}), String::from(\"{}\"));",
+                key,
+                value.trim()
+            ));
+        }
     }
 
     // build except table

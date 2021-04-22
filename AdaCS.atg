@@ -1,0 +1,20 @@
+COMPILER AdaCS
+/*  A subset of Ada from Fischer/LeBlanc: "Crafting a Compiler" */
+
+IGNORECASE
+
+CHARACTERS
+  letter      = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz".
+  digit       = "0123456789".
+  eol         = CHR(10).
+  anyButQuote = ANY - '"' - eol.
+
+TOKENS
+  id    = letter { ["_"] (letter | digit) }.
+  int   = digit { ["_"] digit}.
+  float = digit { ["_"] digit} ("." digit { ["_"] digit } [ ("E" | "e") ["+" | "-"] digit { ["_"] digit } ]| ("E" | "e") ["+" | "-"] digit { ["_"] digit }).
+  str   = '"' {anyButQuote | '""'} '"'.
+
+COMMENTS FROM "--" TO eol
+
+END AdaCS.

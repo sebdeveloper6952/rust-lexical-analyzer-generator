@@ -3,3 +3,4 @@ hexnum = 0x00ff;
 if (var) {
     
 }
+float = 1.23;
