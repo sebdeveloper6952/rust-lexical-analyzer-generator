@@ -3,12 +3,8 @@ use std::collections::{HashMap, HashSet};
 use std::env;
 use std::fmt;
 use std::fs;
-use std::fs::File;
-use std::io::{self, BufRead};
-use std::iter::FromIterator;
 use std::process;
 use std::str::FromStr;
-use std::time::Instant;
 
 /// Global variables
 /// the representation of the Epsilon character
@@ -27,18 +23,7 @@ impl CocolToken {
     }
 }
 
-#[derive(Debug, Clone)]
-struct Token {
-    name: String,
-    lexeme: String,
-}
-
-impl Token {
-    fn new(name: String, lexeme: String) -> Token {
-        Token { name, lexeme }
-    }
-}
-
+/// TODO document handler operators
 fn handle_operators(next_op: char, final_set: &mut Vec<char>, curr_set: &mut Vec<char>) -> bool {
     // handle operator
     let mut ret_val = true;
@@ -59,6 +44,7 @@ fn handle_operators(next_op: char, final_set: &mut Vec<char>, curr_set: &mut Vec
     return ret_val;
 }
 
+/// TODO document parse_cocol_file
 fn parse_cocol_file(
     path: &str,
     cat_table: &mut HashMap<String, Vec<char>>,
@@ -322,6 +308,9 @@ fn parse_cocol_file(
                                 panic!("Error while parsing char literal.");
                             }
                             char_index += 1;
+                            if tokens[1].chars().nth(char_index).unwrap() == '\\' {
+                                char_index += 1;
+                            }
                             curr_set.push(tokens[1].chars().nth(char_index).unwrap());
                             // handle operators
                             handle_operators(next_op, &mut final_set, &mut curr_set);
@@ -348,62 +337,69 @@ fn parse_cocol_file(
         } else if section == 3 {
             // TOKENS
             if tokens.len() > 1 {
-                let mut char_stack = String::new();
                 let mut regex = String::from('(');
-                for i in 0..tokens[1].chars().count() {
-                    let c = tokens[1].chars().nth(i).unwrap();
-                    if c.is_ascii_alphanumeric() {
-                        // accumulate identifier
-                        char_stack.push(c);
-                    } else {
-                        if char_stack.is_empty() {
-                            if c == '(' || c == '{' || c == '[' || c == '\"' {
-                                regex.push('(');
-                            }
-                            continue;
+                let mut char_index = 0;
+                let sentence = tokens[1].trim();
+                while char_index < sentence.chars().count() {
+                    let mut c = sentence.chars().nth(char_index).unwrap();
+                    if c == '\"' {
+                        char_index += 1;
+                        regex.push('(');
+                        while sentence.chars().nth(char_index).unwrap() != '\"' {
+                            regex.push_str(&format!(
+                                "{}.",
+                                sentence.chars().nth(char_index).unwrap()
+                            ));
+                            char_index += 1;
                         }
-                        // check if ident exists
+                        regex.pop();
+                        regex.push(')');
+                    } else if c == '\'' {
+                        char_index += 1;
+                        regex.push('(');
+                        regex.push(sentence.chars().nth(char_index).unwrap());
+                        char_index += 1;
+                        regex.push(')');
+                    } else if c.is_ascii_alphabetic() {
+                        let mut char_stack = String::new();
+                        let mut cc = sentence.chars().nth(char_index).unwrap();
+                        while cc.is_ascii_alphabetic() || cc.is_ascii_digit() {
+                            char_stack.push(sentence.chars().nth(char_index).unwrap());
+                            char_index += 1;
+                            cc = sentence.chars().nth(char_index).unwrap();
+                        }
                         if cat_table.contains_key(&char_stack) {
-                            // get symbols from category table
-                            let symbols = cat_table[&char_stack].clone();
                             regex.push('(');
-                            for s in symbols {
-                                regex.push_str(&format!("{}|", s));
+                            for cc in &cat_table[&char_stack] {
+                                regex.push_str(&format!("{}|", cc));
                             }
-                            // pop extra '|'
                             regex.pop();
-                            // insert closing parentheses
                             regex.push(')');
-                            // handle ident finish character
-                            if c == '{' {
-                                regex.push_str(".(");
-                            } else if c == '}' {
-                                regex.push_str(")*");
-                            } else if c == '[' {
-                                regex.push_str(".(");
-                            } else if c == ']' {
-                                regex.push_str(")?");
-                            } else if c == '(' {
-                                regex.push_str(".(");
-                            } else if c == ')' {
-                                regex.push(')');
-                            } else if c == '|' {
-                                regex.push('|');
-                            } else if c == '\"' {
-                                regex.push(')');
-                            }
-                        } else if c == '\"' {
-                            while !char_stack.is_empty() {
-                                regex.push_str(&format!("{}.", char_stack.remove(0)));
-                            }
-                            regex.pop();
-                            regex.push_str(").");
+                        } else {
+                            println!("Error found while parsing TOKENS sections: token \"{}\" does not exist", char_stack);
+                            process::exit(-1);
                         }
-                        // clear stack to get next ident
-                        char_stack.clear();
+                        char_index -= 1;
+                        println!("regex: {}", regex);
                     }
+
+                    c = sentence.chars().nth(char_index).unwrap();
+                    if c == ' ' || c == '{' || c == '[' || c == '(' || c == '\'' || c == '\"' {
+                        regex.push_str(".(");
+                    } else if c == '}' {
+                        regex.push_str(")*.");
+                    } else if c == ']' {
+                        regex.push_str(")?.");
+                    } else if c == ')' {
+                        regex.push_str(").");
+                    } else if c == '|' {
+                        regex.push('|');
+                    }
+                    char_index += 1;
+
+                    // TODO process the last '.' of each token declaration
                 }
-                regex.push_str(".#");
+                regex.push_str("#");
                 regex.push(')');
                 tok_table.insert(String::from_str(tokens[0]).unwrap(), regex.clone());
                 tokens_vec.push(CocolToken::new(
@@ -436,7 +432,7 @@ fn is_op(c: char) -> bool {
 
 /// Is the char valid in our regular expressions?
 fn is_valid_regex_symbol(c: &char) -> bool {
-    c.is_ascii_alphanumeric() || *c == '#' || *c == EPSILON
+    c.is_ascii_alphanumeric() || *c == '#' || *c == EPSILON || *c == '\'' || *c == '\"'
 }
 
 /// Process the extension operators of regexes:
@@ -640,7 +636,7 @@ impl Node {
 #[derive(Debug, Serialize, Deserialize)]
 struct Dfa {
     /// The transition table of this `Dfa`.
-    dfa: HashMap<u32, HashMap<char, u32>>,
+    dfa: HashMap<u32, HashMap<u8, u32>>,
     /// The set of accepting states of this `Dfa`.
     accepting_states: Vec<u32>,
 }
@@ -651,7 +647,7 @@ impl Dfa {
     /// `dfa`: the transition table for the new DFA.
     /// `accepting_states`: a vector containing the set of accepting states of
     /// the new DFA.
-    fn new(dfa: HashMap<u32, HashMap<char, u32>>, accepting_states: Vec<u32>) -> Dfa {
+    fn new(dfa: HashMap<u32, HashMap<u8, u32>>, accepting_states: Vec<u32>) -> Dfa {
         Dfa {
             dfa,
             accepting_states,
@@ -673,33 +669,6 @@ impl fmt::Display for Dfa {
             &self.accepting_states,
             &self.dfa
         )
-    }
-}
-
-#[derive(Serialize)]
-/// Struct to represent a finite automata and serialize it
-/// to JSON.
-///
-/// Contains a regular expression, an alphabet, and the finite
-/// automata. The finite automata can be an instance of a Nfa,
-/// or a Dfa.
-struct FAFile {
-    /// The alphabet that was extracted from the `regex`.
-    alphabet: HashSet<char>,
-    /// The regular expression recognized by this `fa`.
-    regex: String,
-    /// A finite automata instance, it can be a `Nfa` of a `Dfa`.
-    dfa: Dfa,
-}
-
-impl FAFile {
-    /// Create a new FaFile.
-    fn new(alphabet: HashSet<char>, regex: String, dfa: Dfa) -> FAFile {
-        FAFile {
-            alphabet,
-            regex,
-            dfa,
-        }
     }
 }
 
@@ -931,7 +900,7 @@ fn regex_dfa(
     root: &Node,
     alphabet: &HashSet<char>,
 ) -> Dfa {
-    let mut dfa: HashMap<u32, HashMap<char, u32>> = HashMap::new();
+    let mut dfa: HashMap<u32, HashMap<u8, u32>> = HashMap::new();
     let mut d_states: HashSet<Vec<u32>> = HashSet::new();
     let mut d_acc_states: Vec<u32> = Vec::new();
     let mut d_states_map: HashMap<Vec<u32>, u32> = HashMap::new();
@@ -996,7 +965,7 @@ fn regex_dfa(
             if u_vec.len() > 0 {
                 dfa.get_mut(&d_states_map[&state_t])
                     .unwrap()
-                    .insert(*a, d_states_map[&u_vec]);
+                    .insert(*a as u8, d_states_map[&u_vec]);
             }
             // check if U is an accepting state
             let intersection = u.intersection(&s_table[&'#']);
@@ -1055,7 +1024,7 @@ fn main() {
         process::exit(1);
     }
     let file = fs::read_to_string(&args[1]).unwrap();
-    let mut dfa: HashMap<u32, HashMap<char, u32>> = HashMap::new();
+    let mut dfa:  HashMap<u32, HashMap<u8, u32>> = HashMap::new();
     let mut accepting_states: HashMap<u32, String> = HashMap::new();
     let mut keywords: HashMap<String, String> = HashMap::new();
 ",
@@ -1070,7 +1039,7 @@ fn main() {
         }
         for (key_char, value_s) in value {
             code.push_str(&format!(
-                "dfa.get_mut(&{}).unwrap().insert('{}', {});",
+                "dfa.get_mut(&{}).unwrap().insert({}, {});",
                 key, key_char, value_s
             ));
         }
@@ -1125,7 +1094,7 @@ fn main() {
     let mut curr_lexeme = String::new();
     let mut found_tokens: Vec<Token> = Vec::new();
     while curr_idx < bytes.len() {
-        let curr_char = bytes[curr_idx] as char;
+        let curr_char = bytes[curr_idx];
     ",
     );
 
@@ -1145,7 +1114,7 @@ fn main() {
         let next_state = dfa[&curr_state][&curr_char];
         curr_state = next_state;
         states.push(curr_state);
-        curr_lexeme.push(curr_char);
+        curr_lexeme.push(curr_char as char);
         curr_idx += 1;
     }
     else if !states.is_empty() {

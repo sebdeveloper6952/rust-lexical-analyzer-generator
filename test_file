@@ -1,5 +1,5 @@
 var = 123;
-hexnum = 0x00FF;
+hexnum = 0x00ff;
 if (var) {
     
 }
