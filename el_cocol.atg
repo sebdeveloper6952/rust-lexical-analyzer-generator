@@ -15,14 +15,20 @@ any              = letter+digit+quote+apostrophe.
 anyButQuote      = any-quote.
 anyButApostrophe = any-apostrophe.
 
+KEYWORDS
+
+if               = "if"
+char             = "char"
+int              = "int"
+
 TOKENS
 
-ident          = letter{letter|digit}.
-number         = digit{digit}.
-hexnumber      = "0x"hexdigit{hexdigit}.
-float          = digit{digit}'.'digit{digit}.
-string         = apostrophe(anyButQuote)apostrophe.
-char           = quote(anyButApostrophe)quote.
+ident            = letter{letter|digit} EXCEPT KEYWORDS.
+number           = digit{digit}.
+hexnumber        = "0x"hexdigit{hexdigit}.
+float            = digit{digit}'.'digit{digit}.
+char             = apostrophe(anyButApostrophe)apostrophe.
+string           = quote{anyButQuote}quote.
 
 PRODUCTIONS
 

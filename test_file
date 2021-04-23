@@ -4,3 +4,6 @@ if (var) {
     
 }
 float = 1.23;
+
+name = "sebas"
+char = 's';

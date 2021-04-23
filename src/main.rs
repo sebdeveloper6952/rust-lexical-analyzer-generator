@@ -6,12 +6,13 @@ use std::fs;
 use std::process;
 use std::str::FromStr;
 
-/// Global variables
-/// the representation of the Epsilon character
+/// The representation of the Epsilon character
 const EPSILON: char = '@';
+/// The character used as an explicit concatenation operator
+/// in the regular expressions.
 const CONCAT_CHAR: char = 31 as char;
 
-/// AST node representation
+/// Cocol token representation.
 #[derive(Debug, Clone)]
 struct CocolToken {
     name: String,
@@ -24,7 +25,9 @@ impl CocolToken {
     }
 }
 
-/// TODO document handler operators
+/// This function is only used inside the parse_cocol_file function to avoid code repetition.
+/// 
+/// It mutates both sets `final_set` and `curr_set` accordingly to the value of `next_op`
 fn handle_operators(next_op: char, final_set: &mut Vec<char>, curr_set: &mut Vec<char>) -> bool {
     // handle operator
     let mut ret_val = true;
@@ -45,7 +48,19 @@ fn handle_operators(next_op: char, final_set: &mut Vec<char>, curr_set: &mut Vec
     return ret_val;
 }
 
-/// TODO document parse_cocol_file
+/// Parses a COCOL/R grammar file, section by section.
+/// 
+/// Output:
+/// - cat_table:    A table that holds all the character sets defined in the 
+///                 CHARACTERS section.
+/// - keywords:     A table that holds all keywords defined in the KEYWORDS section.
+/// - tok_table:    A table that holds all tokens found in the TOKENS section. The
+///                 key is the token name and the value is the token regular expression.
+/// - tokens_vec:   A vector that holds instances of `CocolToken`, for each token found
+///                 in the TOKENS section.
+/// - except_table: A table holding which tokens use the `EXCEPT KEYWORDS` syntax.
+/// - whitespace:   A set of characters that are considered whitespace, as defined using
+///                 the IGNORE syntax.
 fn parse_cocol_file(
     path: &str,
     cat_table: &mut HashMap<String, Vec<char>>,
@@ -288,6 +303,7 @@ fn parse_cocol_file(
                                     }
                                     // handle operator
                                     handle_operators(next_op, &mut final_set, &mut curr_set);
+                                    println!("final set {:?}", final_set);
                                     next_op = 0 as char;
                                 }
                             } else {
@@ -340,10 +356,20 @@ fn parse_cocol_file(
             if tokens.len() > 1 {
                 let mut regex = String::from('(');
                 let mut char_index = 0;
-                let sentence = tokens[1].trim();
+                let mut sentence = tokens[1].trim().to_string();
+                let mut parsing = false;
+
+                // process EXCEPT KEYWORDS
+                if sentence.contains("EXCEPT KEYWORDS.") {
+                    except_table.insert(String::from(tokens[0].trim()), true);
+                    sentence = sentence.as_str()[0..sentence.len() - 17].to_string();
+                    sentence.push('.');
+                }
+
                 while char_index < sentence.chars().count() {
                     let mut c = sentence.chars().nth(char_index).unwrap();
                     if c == '\"' {
+                        parsing = true;
                         char_index += 1;
                         regex.push('(');
                         while sentence.chars().nth(char_index).unwrap() != '\"' {
@@ -357,12 +383,18 @@ fn parse_cocol_file(
                         regex.pop();
                         regex.push(')');
                     } else if c == '\'' {
+                        parsing = true;
                         char_index += 1;
                         regex.push('(');
+                        if sentence.chars().nth(char_index).unwrap() == '\\' {
+                            // regex.push(sentence.chars().nth(char_index).unwrap());
+                            char_index += 1;
+                        }
                         regex.push(sentence.chars().nth(char_index).unwrap());
                         char_index += 1;
                         regex.push(')');
                     } else if c.is_ascii_alphabetic() {
+                        parsing = true;
                         let mut char_stack = String::new();
                         let mut cc = sentence.chars().nth(char_index).unwrap();
                         while cc.is_ascii_alphabetic() || cc.is_ascii_digit() {
@@ -377,6 +409,13 @@ fn parse_cocol_file(
                             }
                             regex.pop();
                             regex.push(')');
+                        } else if tok_table.contains_key(&char_stack) {
+                            println!("Token {} refers to token {}", tokens[0], char_stack);
+                            let mut rregex = tok_table[&char_stack].clone();
+                            println!("RREGEX IS {}", rregex);
+                            rregex.pop();
+                            regex.push_str(rregex.as_str());
+                            // regex.push_str(tok_table[&char_stack].as_str());
                         } else {
                             println!("Error found while parsing TOKENS sections: token \"{}\" does not exist", char_stack);
                             process::exit(-1);
@@ -386,7 +425,7 @@ fn parse_cocol_file(
                     }
 
                     c = sentence.chars().nth(char_index).unwrap();
-                    if c == ' ' || c == '{' || c == '[' || c == '(' {
+                    if parsing && c == ' ' || c == '{' || c == '[' || c == '(' {
                         regex.push_str(&format!("{}(", CONCAT_CHAR));
                     } else if c == '\'' || c == '\"' {
                         regex.push(CONCAT_CHAR);
@@ -399,26 +438,24 @@ fn parse_cocol_file(
                     } else if c == '|' {
                         regex.push('|');
                     }
+                    parsing = false;
                     char_index += 1;
-
-                    // TODO process the last '.' of each token declaration
                 }
+                // add the final #
                 let last = regex.pop().unwrap();
                 if last == CONCAT_CHAR {
                     regex.push_str(&format!("{}#", CONCAT_CHAR));
                 } else {
                     regex.push_str(&format!("{}{}#", last, CONCAT_CHAR));
                 }
-                // regex.push_str("#");
+                // close regex
                 regex.push(')');
-                tok_table.insert(String::from_str(tokens[0]).unwrap(), regex.clone());
+                tok_table.insert(String::from_str(tokens[0].trim()).unwrap(), regex.clone());
+                println!("TOKEN_TABLE insert: {} => {}", tokens[0], regex);
                 tokens_vec.push(CocolToken::new(
                     String::from_str(tokens[0].trim()).unwrap(),
                     regex,
                 ));
-                if tokens[1].contains("EXCEPT KEYWORDS") {
-                    except_table.insert(String::from(tokens[0].trim()), true);
-                }
             }
         } else if section == 4 {
             // PRODUCTIONS
@@ -436,12 +473,15 @@ fn is_op(c: char) -> bool {
         '*' => true,
         CONCAT_CHAR => true,
         '|' => true,
+        '(' => true,
+        ')' => true,
         _ => false,
     }
 }
 
 /// Is the char valid in our regular expressions?
 fn is_valid_regex_symbol(c: &char) -> bool {
+    // !(is_op(*c)) && ((*c as u8) >= 32 && (*c as u8) < 127)
     c.is_ascii_alphanumeric() || *c == '#' || *c == EPSILON || *c == '\'' || *c == '\"' || *c == '.'
 }
 
@@ -1000,6 +1040,18 @@ fn regex_dfa(
     Dfa::new(dfa, d_acc_states)
 }
 
+/// Generates the lexical analyzer source file.
+/// 
+/// Input
+///  - filename:         the file name of the lexical analyzer source file.
+///  - dfa:              the DFA that represents the grammar parsed in the COCOL file.
+///  - accepting_states: a mapping of state number to their corresponding token.
+///  - keywords:         a map holding all the keywords found in the KEYWORDS section
+///  - except_table:     a table holding which tokens use the `EXCEPT KEYWORDS` syntax.
+///  - whitespace:       a set of characters marked as whitespace.
+/// 
+/// Output
+///  - Writes the lexical analyzer source file to the project root directory.
 fn generate_code(
     filename: &str,
     dfa: &Dfa,
