@@ -6,25 +6,39 @@ COMPILER example
 
 CHARACTERS
 
-letter = "a"+"bcdefghijklmnopqrstuvwxyz"+"ABCDEFGHIJKLMNOPQRSTUVWXYZ".
-digit = "0123456789".
-hexdigit = digit+"ABCDEF".
-nonZeroDigit = digit-"0".
-vowels = letter-"bcdfghjklmnpqrstvwxyzBCDFGHJKLMNPQRSTVWXYZ".
-specials = 'a'+CHR(33)..CHR(47)+'b'.
+operators = "+-=()[]{}.<>".
+letter    = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ".
+digit     = "0123456789".
+hexdigit  = digit+"abcdefABCDEF".
+cr = CHR(13).
+lf = CHR(10).
 tab = CHR(9).
-charTest = 's'.
+ignore = cr+lf+tab.
 
 KEYWORDS
 
-if = "if".
-while = "while".
+if     = "if".
+else   = "else".
+do     = "do".
+while  = "while".
+switch = "switch".
+int    = "int".
+double = "double".
+float  = "float".
+char   = "char".
+void   = "void".
+return = "return".
 
 TOKENS
 
-id = letter{letter|digit} EXCEPT KEYWORDS.
-integer = nonZeroDigit{digit}.
-hexnumber = "0x"hexdigit{hexdigit}.
+id         = letter{letter|digit} EXCEPT KEYWORDS.
+integer    = digit{digit}.
+signnumber = ['-']digit{digit}.
+hexnumber  = "0x" hexdigit hexdigit hexdigit hexdigit.
+decnumber  = digit{digit}"."digit{digit}.
+char       = "'" letter "'".
+string     = '\"' {letter} '\"'.
+macro      = "#define".
 
 PRODUCTIONS
 

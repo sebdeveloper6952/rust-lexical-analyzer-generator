@@ -1,0 +1,43 @@
+COMPILER MyCOCOR
+(.//Especificacion de Funciones.)
+CHARACTERS
+
+letter= "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz".
+digit= "0123456789".
+
+cr = CHR(13).
+lf = CHR(10).
+tab = CHR(9).
+ignore = cr+lf+tab.
+comillas = CHR(34).
+stringletter = ANY-comillas-ignore.
+
+operadores ="+-=()[]{}|.<>".
+MyANY = ANY-operadores.
+
+KEYWORDS
+
+if     = "if".
+else   = "else".
+do     = "do".
+while  = "while".
+switch = "switch".
+int    = "int".
+double = "double".
+float  = "float".
+char   = "char".
+void   = "void".
+
+TOKENS
+
+ident = letter{letter|digit} EXCEPT KEYWORDS.
+string = comillas stringletter{stringletter} comillas.
+
+char = "'" ["\"] letter "'".
+charnumber = "CHR("digit{digit}")".
+charinterval = "CHR("digit{digit}")""..""CHR("digit{digit}")".
+
+IGNORE ignore
+
+
+END MyCOCOR

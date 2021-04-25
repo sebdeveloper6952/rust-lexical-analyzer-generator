@@ -1,9 +1,10 @@
 var = 123;
-hexnum = 0x00ff;
+hexnum = 0xcafe;
 if (var) {
     
 }
 float = 1.23;
 
 name = "sebas"
-char = 's';
+char = 'a';
+char = 'b';

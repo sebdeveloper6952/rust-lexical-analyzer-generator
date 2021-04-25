@@ -8,9 +8,10 @@ digit    = "0123456789" .
 hexdigit = digit + "ABCDEFabcdef" .
 tab      = CHR(9) .
 eol      = CHR(10) .
+space    = ' '.
 files    = letter + digit + ":\\." .
-chars    = CHR(32) .. CHR(255) - "'" .
-strings  = CHR(32) .. CHR(255) - '"'.
+chars    = ANY - "'" .
+strings  = ANY - '"'.
 macros   = ANY - eol .
 
 TOKENS
@@ -20,6 +21,7 @@ hexnumber  = "0" ( "x" | "X" ) hexdigit { hexdigit } [ "U" | "u" | "L" | "l" ] .
 string     = '"' { strings } '"' .
 char       = "'" [ "\\" ] chars "'" .
 library    = "<" files { files } ">" .
+comment    = "/*" {letter|digit|space} "*/".
 
 COMMENTS FROM "/*" TO "*/"
 
