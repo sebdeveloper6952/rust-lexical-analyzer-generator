@@ -3,7 +3,7 @@ COMPILER Aritmetica
 CHARACTERS 
 
 letter = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz". 
-digit = "0123456789".
+digit = "0123456789" .
 tab = CHR(9).
 eol = CHR(10).
 
@@ -12,7 +12,7 @@ KEYWORDS
 while = "while".
 do = "do".
 if = "if".
-switch = "switch".
+switch = "switch"
 
 TOKENS
 

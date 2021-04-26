@@ -17,25 +17,21 @@ MyANY = ANY-operadores.
 
 KEYWORDS
 
-if     = "if".
-else   = "else".
-do     = "do".
-while  = "while".
-switch = "switch".
-int    = "int".
-double = "double".
-float  = "float".
-char   = "char".
-void   = "void".
+while = "while".
+do = "do".
 
 TOKENS
 
 ident = letter{letter|digit} EXCEPT KEYWORDS.
 string = comillas stringletter{stringletter} comillas.
 
-char = "'" ["\"] letter "'".
+char = "'"["/"]letter"'".
 charnumber = "CHR("digit{digit}")".
 charinterval = "CHR("digit{digit}")""..""CHR("digit{digit}")".
+
+nontoken = MyANY.
+startcode ="(.".
+endcode=".)".
 
 IGNORE ignore
 

@@ -9,6 +9,7 @@ int main(void)
     int hex = 0xcafe;
     int negative = -69;
     float f = 1.23;
+    char my_char = 'a';
 
     printint(integer);
     printf("hex: %x\n", hex);

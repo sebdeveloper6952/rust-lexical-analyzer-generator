@@ -14,20 +14,20 @@ const PARENTHESES_CLOSE: char = 16 as char;
 /// The character used as an explicit concatenation operator
 /// in the regular expressions.
 // const CONCAT_CHAR: char = 17 as char;
-const KLEENE_CHAR: char = 18 as char;
+// const KLEENE_CHAR: char = 18 as char;
 const POSITIVE_CHAR: char = 19 as char;
 // const UNION_CHAR: char = 20 as char;
 // const EXT_CHAR: char = 26 as char;
-// const OPTIONAL_CHAR: char = 22 as char;
+const OPTIONAL_CHAR: char = 22 as char;
 
 // const PARENTHESES_OPEN: char = '(';
 // const PARENTHESES_CLOSE: char = ')';
 const CONCAT_CHAR: char = '~';
-// const KLEENE_CHAR: char = '*';
+const KLEENE_CHAR: char = '*';
 // const POSITIVE_CHAR: char = '+';
 const UNION_CHAR: char = '|';
 const EXT_CHAR: char = '&';
-const OPTIONAL_CHAR: char = '?';
+// const OPTIONAL_CHAR: char = '?';
 
 /// Cocol token representation.
 #[derive(Debug, Clone)]
@@ -602,6 +602,291 @@ fn regex_dfa(
     Dfa::new(dfa, d_acc_states)
 }
 
+/// Parses a line from the CHARACTERS section of a IGNORE line (whitespace).
+///
+/// Input:
+///  - line:         a vector of str containing the parts of a line. V[0] is the name
+///                  of the category, or "IGNORE". V[1] is the set representation.
+///                  Ex.: V = [my_set, ""a" + "b" + "c"."]
+/// - cat_table:     a mutable reference to the character sets table.
+/// - whitespace:    a mutable reference to the whitespace characters set.
+/// - is_whitespace: a boolean value indicating if the line is a whitespace.
+///                  If `false`, the line is considered as a CHARACTERS set.
+///
+/// Output: updates the appropiate data structures passed as inputs.
+fn parse_characters_line(
+    line: Vec<&str>,
+    cat_table: &mut HashMap<String, Vec<char>>,
+    whitespace: &mut HashSet<char>,
+    is_whitespace: bool,
+) {
+    let key = String::from_str(line[0].trim_end()).unwrap();
+    let mut ident_vec = String::new();
+    let mut final_set: Vec<char> = Vec::new();
+    let mut curr_set: Vec<char> = Vec::new();
+    let mut next_op: char = 0 as char;
+    let mut char_index = 0;
+
+    while char_index < line[1].chars().count() {
+        let c: char = line[1].chars().nth(char_index).unwrap();
+
+        if c == '+' || c == '-' {
+            next_op = c;
+            char_index += 1;
+            continue;
+        }
+
+        // basic set
+        if c == '\"' {
+            char_index += 1;
+            while line[1].chars().nth(char_index).unwrap() != '\"' {
+                curr_set.push(line[1].chars().nth(char_index).unwrap());
+                char_index += 1;
+            }
+            // handle operators (+|-)
+            handle_operators(next_op, &mut final_set, &mut curr_set);
+            next_op = 0 as char;
+        }
+        // letter{leter|digit} | CHR() | CHR()..CHR()
+        else if c.is_alphabetic() {
+            let mut cc = line[1].chars().nth(char_index).unwrap();
+            while cc.is_ascii_alphanumeric() {
+                ident_vec.push(cc);
+                char_index += 1;
+                cc = line[1].chars().nth(char_index).unwrap();
+            }
+            // ident is CHR
+            if ident_vec == "CHR" {
+                ident_vec.clear();
+                if line[1].chars().nth(char_index).unwrap() == '(' {
+                    let mut int_stack = String::new();
+                    char_index += 1;
+                    while line[1].chars().nth(char_index).unwrap().is_numeric() {
+                        int_stack.push(line[1].chars().nth(char_index).unwrap());
+                        char_index += 1;
+                    }
+                    let range_start = int_stack.parse::<u8>().unwrap();
+                    if (line[1].chars().count() - char_index > 6)
+                        && line[1].chars().nth(char_index + 1).unwrap() == '.'
+                        && line[1].chars().nth(char_index + 2).unwrap() == '.'
+                        && line[1].chars().nth(char_index + 3).unwrap() == 'C'
+                        && line[1].chars().nth(char_index + 4).unwrap() == 'H'
+                        && line[1].chars().nth(char_index + 5).unwrap() == 'R'
+                        && line[1].chars().nth(char_index + 6).unwrap() == '('
+                    {
+                        char_index += 7;
+                        int_stack.clear();
+                        while line[1].chars().nth(char_index).unwrap().is_numeric() {
+                            int_stack.push(line[1].chars().nth(char_index).unwrap());
+                            char_index += 1;
+                        }
+                        let range_end = int_stack.parse::<u8>().unwrap();
+                        // push range
+                        for i in range_start..range_end {
+                            curr_set.push(i as char);
+                        }
+                    } else {
+                        curr_set.push(range_start as char);
+                    }
+                    // handle operator
+                    handle_operators(next_op, &mut final_set, &mut curr_set);
+                    next_op = 0 as char;
+                }
+            } else {
+                println!("ident_vec: {:?}", ident_vec);
+                curr_set.extend(cat_table[&ident_vec].clone());
+                // handle operators
+                handle_operators(next_op, &mut final_set, &mut curr_set);
+                next_op = 0 as char;
+
+                // clear data
+                ident_vec.clear();
+                continue;
+            }
+        }
+        // char literal
+        else if c == '\'' {
+            if line[1].chars().nth(char_index + 1).unwrap() == '\''
+                && line[1].chars().nth(char_index + 2).unwrap() != '\''
+            {
+                panic!("Error while parsing char literal: quote must be escaped");
+            }
+            char_index += 1;
+            if line[1].chars().nth(char_index).unwrap() == '\\' {
+                char_index += 1;
+            }
+            // push the character literal
+            curr_set.push(line[1].chars().nth(char_index).unwrap());
+            // handle char range
+            if (line[1].chars().count() - char_index) > 5
+                && line[1].chars().nth(char_index + 2).unwrap() == '.'
+                && line[1].chars().nth(char_index + 3).unwrap() == '.'
+                && line[1].chars().nth(char_index + 4).unwrap() == '\''
+            {
+                let range_start: u8 = line[1].chars().nth(char_index).unwrap() as u8 + 1;
+                let range_end: u8 = line[1].chars().nth(char_index + 5).unwrap() as u8;
+                if range_start > range_end {
+                    println!("Error while parsing character range: range start must be greater than range end.");
+                    process::exit(-1);
+                }
+                for i in range_start..range_end {
+                    curr_set.push(i as char);
+                }
+            }
+
+            // handle operators
+            handle_operators(next_op, &mut final_set, &mut curr_set);
+            next_op = 0 as char;
+
+            // closing \'
+            char_index += 1;
+        }
+
+        if char_index == line[1].chars().count() - 1 {
+            if is_whitespace {
+                for c in &final_set {
+                    whitespace.insert(*c);
+                }
+            } else {
+                cat_table.insert(key.clone(), final_set.clone());
+            }
+        }
+        char_index += 1;
+    }
+}
+
+/// Parses a line from the TOKENS section. A regular expression is created for
+/// the token and inserted in the `tok_table`.
+///
+/// Inputs:
+///  - line:         a vector of `&str` representing the line.
+///  - except_table: a mutable reference to the table that holds tokens that
+///                  specify a "EXCEPT KEYWORDS" instruction.
+///  - cat_table:    a reference to the character sets categories table.
+///  - tok_table:    a mutable reference to the table holding the tokens.
+///  - tokens_vec:   a mutable reference to the vector holding the `CocolToken`
+///                  tokens. One `CocolToken` is created for every found token.
+///
+/// Outputs: updates the appropiate data structures passed as input.
+fn parse_tokens_line(
+    line: Vec<&str>,
+    except_table: &mut HashMap<String, bool>,
+    cat_table: &HashMap<String, Vec<char>>,
+    tok_table: &mut HashMap<String, String>,
+    tokens_vec: &mut Vec<CocolToken>,
+) {
+    let mut regex = String::from(PARENTHESES_OPEN);
+    let mut char_index = 0;
+    let mut sentence = line[1].trim().to_string();
+
+    // process EXCEPT KEYWORDS
+    if sentence.contains("EXCEPT KEYWORDS.") {
+        except_table.insert(String::from(line[0].trim()), true);
+        sentence = sentence.as_str()[0..sentence.len() - 17].to_string();
+        sentence.push('.');
+    }
+
+    while char_index < sentence.chars().count() {
+        let c = sentence.chars().nth(char_index).unwrap();
+        if c == ' ' {
+            char_index += 1;
+        } else if c == ')' || c == ']' || c == '}' {
+            let cc = regex.pop().unwrap();
+            if cc != CONCAT_CHAR {
+                regex.push(cc);
+            }
+            regex.push(PARENTHESES_CLOSE);
+            if c == ']' {
+                regex.push(OPTIONAL_CHAR);
+            } else if c == '}' {
+                regex.push(KLEENE_CHAR);
+            }
+            regex.push(CONCAT_CHAR);
+            char_index += 1;
+        } else if c == '(' || c == '[' || c == '{' {
+            regex.push(PARENTHESES_OPEN);
+            char_index += 1;
+            continue;
+        } else if c == '|' {
+            let cc = regex.pop().unwrap();
+            if cc != CONCAT_CHAR {
+                regex.push(cc);
+            }
+            regex.push(UNION_CHAR);
+            char_index += 1;
+            continue;
+        } else if c == '\'' {
+            char_index += 1;
+            regex.push(PARENTHESES_OPEN);
+            if sentence.chars().nth(char_index).unwrap() == '\\' {
+                char_index += 1;
+            }
+            regex.push(sentence.chars().nth(char_index).unwrap());
+            regex.push(PARENTHESES_CLOSE);
+            regex.push(CONCAT_CHAR);
+            // skip the closing '\''
+            char_index += 2;
+        } else if c == '\"' {
+            char_index += 1;
+            regex.push(PARENTHESES_OPEN);
+            while sentence.chars().nth(char_index).unwrap() != '\"' {
+                regex.push_str(&format!(
+                    "{}{}",
+                    sentence.chars().nth(char_index).unwrap(),
+                    CONCAT_CHAR
+                ));
+                char_index += 1;
+            }
+            regex.pop();
+            regex.push_str(&format!("{}{}", PARENTHESES_CLOSE, CONCAT_CHAR));
+            char_index += 1;
+            continue;
+        } else if c.is_ascii_alphabetic() {
+            let mut char_stack = String::new();
+            let mut cc = sentence.chars().nth(char_index).unwrap();
+            // grab the ident
+            while cc.is_ascii_alphabetic() || cc.is_ascii_digit() {
+                char_stack.push(sentence.chars().nth(char_index).unwrap());
+                char_index += 1;
+                cc = sentence.chars().nth(char_index).unwrap();
+            }
+            // search ident in cat table
+            if cat_table.contains_key(&char_stack) {
+                regex.push(PARENTHESES_OPEN);
+                for cc in &cat_table[&char_stack] {
+                    regex.push_str(&format!("{}{}", cc, UNION_CHAR));
+                }
+                regex.pop();
+                regex.push_str(&format!("{}{}", PARENTHESES_CLOSE, CONCAT_CHAR));
+            } else if tok_table.contains_key(&char_stack) {
+                // extend the current regular expression
+                let mut rregex = tok_table[&char_stack].clone();
+                let mut count = 1;
+                while rregex.chars().nth(rregex.len() - count).unwrap() != CONCAT_CHAR {
+                    count += 1;
+                }
+                rregex.remove(rregex.len() - count);
+                regex.push_str(&format!("{}{}", rregex.as_str(), CONCAT_CHAR));
+            } else {
+                println!(
+                    "Error found while parsing TOKENS sections: token \"{}\" does not exist",
+                    char_stack
+                );
+                process::exit(-1);
+            }
+        } else if c == '.' {
+            break;
+        }
+    }
+    // close regex
+    regex.push(PARENTHESES_CLOSE);
+    tok_table.insert(String::from_str(line[0].trim()).unwrap(), regex.clone());
+    tokens_vec.push(CocolToken::new(
+        String::from_str(line[0].trim()).unwrap(),
+        regex,
+    ));
+}
+
 /// This function is only used inside the parse_cocol_file function to avoid code repetition.
 ///
 /// It mutates both sets `final_set` and `curr_set` accordingly to the value of `next_op`
@@ -682,6 +967,7 @@ fn parse_cocol_file(
     while !lines.is_empty() {
         let line = lines.pop().unwrap();
         let tokens: Vec<&str> = line.splitn(2, '=').collect();
+        println!("tokens: {:?}", tokens);
         // update file section
         match sections.iter().position(|&s| s == tokens[0].trim()) {
             Some(pos) => {
@@ -693,144 +979,8 @@ fn parse_cocol_file(
         // process each section
         if section == 1 {
             // CHARACTERS
-            if tokens.len() > 1 {
-                if tokens[0].len() > 0 {
-                    let key = String::from_str(tokens[0].trim_end()).unwrap();
-                    let mut ident_vec = String::new();
-                    let mut final_set: Vec<char> = Vec::new();
-                    let mut curr_set: Vec<char> = Vec::new();
-                    let mut next_op: char = 0 as char;
-
-                    // loop through each char
-                    let mut char_index = 0;
-                    while char_index < tokens[1].chars().count() {
-                        let c: char = tokens[1].chars().nth(char_index).unwrap();
-
-                        if c == '+' || c == '-' {
-                            next_op = c;
-                            char_index += 1;
-                            continue;
-                        }
-
-                        // basic set
-                        if c == '\"' {
-                            char_index += 1;
-                            while tokens[1].chars().nth(char_index).unwrap() != '\"' {
-                                curr_set.push(tokens[1].chars().nth(char_index).unwrap());
-                                char_index += 1;
-                            }
-                            // handle operators (+|-)
-                            handle_operators(next_op, &mut final_set, &mut curr_set);
-                            next_op = 0 as char;
-                        }
-                        // letter{leter|digit} | CHR() | CHR()..CHR()
-                        else if c.is_alphabetic() {
-                            let mut cc = tokens[1].chars().nth(char_index).unwrap();
-                            while cc.is_ascii_alphanumeric() {
-                                ident_vec.push(cc);
-                                char_index += 1;
-                                cc = tokens[1].chars().nth(char_index).unwrap();
-                            }
-                            // ident is CHR
-                            if ident_vec == "CHR" {
-                                ident_vec.clear();
-                                if tokens[1].chars().nth(char_index).unwrap() == '(' {
-                                    let mut int_stack = String::new();
-                                    char_index += 1;
-                                    while tokens[1].chars().nth(char_index).unwrap().is_numeric() {
-                                        int_stack.push(tokens[1].chars().nth(char_index).unwrap());
-                                        char_index += 1;
-                                    }
-                                    let range_start = int_stack.parse::<u8>().unwrap();
-                                    if (tokens[1].chars().count() - char_index > 6)
-                                        && tokens[1].chars().nth(char_index + 1).unwrap() == '.'
-                                        && tokens[1].chars().nth(char_index + 2).unwrap() == '.'
-                                        && tokens[1].chars().nth(char_index + 3).unwrap() == 'C'
-                                        && tokens[1].chars().nth(char_index + 4).unwrap() == 'H'
-                                        && tokens[1].chars().nth(char_index + 5).unwrap() == 'R'
-                                        && tokens[1].chars().nth(char_index + 6).unwrap() == '('
-                                    {
-                                        char_index += 7;
-                                        int_stack.clear();
-                                        while tokens[1]
-                                            .chars()
-                                            .nth(char_index)
-                                            .unwrap()
-                                            .is_numeric()
-                                        {
-                                            int_stack
-                                                .push(tokens[1].chars().nth(char_index).unwrap());
-                                            char_index += 1;
-                                        }
-                                        let range_end = int_stack.parse::<u8>().unwrap();
-                                        // push range
-                                        for i in range_start..range_end {
-                                            curr_set.push(i as char);
-                                        }
-                                    } else {
-                                        curr_set.push(range_start as char);
-                                    }
-                                    // handle operator
-                                    handle_operators(next_op, &mut final_set, &mut curr_set);
-                                    next_op = 0 as char;
-                                }
-                            } else {
-                                curr_set.extend(cat_table[&ident_vec].clone());
-                                // handle operators
-                                handle_operators(next_op, &mut final_set, &mut curr_set);
-                                next_op = 0 as char;
-
-                                // clear data
-                                ident_vec.clear();
-                                continue;
-                            }
-                        }
-                        // char literal
-                        else if c == '\'' {
-                            if tokens[1].chars().nth(char_index + 1).unwrap() == '\''
-                                && tokens[1].chars().nth(char_index + 2).unwrap() != '\''
-                            {
-                                panic!("Error while parsing char literal: quote must be escaped");
-                            }
-                            char_index += 1;
-                            if tokens[1].chars().nth(char_index).unwrap() == '\\' {
-                                char_index += 1;
-                            }
-                            // push the character literal
-                            curr_set.push(tokens[1].chars().nth(char_index).unwrap());
-                            // handle char range
-                            if (tokens[1].chars().count() - char_index) > 5
-                                && tokens[1].chars().nth(char_index + 2).unwrap() == '.'
-                                && tokens[1].chars().nth(char_index + 3).unwrap() == '.'
-                                && tokens[1].chars().nth(char_index + 4).unwrap() == '\''
-                            {
-                                let range_start: u8 =
-                                    tokens[1].chars().nth(char_index).unwrap() as u8 + 1;
-                                let range_end: u8 =
-                                    tokens[1].chars().nth(char_index + 5).unwrap() as u8;
-                                if range_start > range_end {
-                                    println!("Error while parsing character range: range start must be greater than range end.");
-                                    process::exit(-1);
-                                }
-                                for i in range_start..range_end {
-                                    curr_set.push(i as char);
-                                }
-                            }
-
-                            // handle operators
-                            handle_operators(next_op, &mut final_set, &mut curr_set);
-                            next_op = 0 as char;
-
-                            // closing \'
-                            char_index += 1;
-                        }
-
-                        if char_index == tokens[1].chars().count() - 1 {
-                            cat_table.insert(key.clone(), final_set.clone());
-                        }
-                        char_index += 1;
-                    }
-                }
+            if tokens.len() > 1 && tokens[0].len() > 0 {
+                parse_characters_line(tokens, cat_table, whitespace, false);
             }
         } else if section == 2 {
             // KEYWORDS
@@ -839,122 +989,16 @@ fn parse_cocol_file(
                 keyword.retain(|a| a != '.');
                 keywords.insert(keyword, String::from_str(tokens[0].trim()).unwrap());
             }
-        } else if section == 3 {
-            // TOKENS
-            if tokens.len() > 1 {
-                let mut regex = String::from(PARENTHESES_OPEN);
-                let mut char_index = 0;
-                let mut sentence = tokens[1].trim().to_string();
-
-                // process EXCEPT KEYWORDS
-                if sentence.contains("EXCEPT KEYWORDS.") {
-                    except_table.insert(String::from(tokens[0].trim()), true);
-                    sentence = sentence.as_str()[0..sentence.len() - 17].to_string();
-                    sentence.push('.');
-                }
-
-                while char_index < sentence.chars().count() {
-                    let c = sentence.chars().nth(char_index).unwrap();
-                    if c == ' ' {
-                        char_index += 1;
-                    } else if c == ')' || c == ']' || c == '}' {
-                        let cc = regex.pop().unwrap();
-                        if cc != CONCAT_CHAR {
-                            regex.push(cc);
-                        }
-                        regex.push(PARENTHESES_CLOSE);
-                        if c == ']' {
-                            regex.push(OPTIONAL_CHAR);
-                        } else if c == '}' {
-                            regex.push(KLEENE_CHAR);
-                        }
-                        regex.push(CONCAT_CHAR);
-                        char_index += 1;
-                    } else if c == '(' || c == '[' || c == '{' {
-                        regex.push(PARENTHESES_OPEN);
-                        char_index += 1;
-                        continue;
-                    } else if c == '|' {
-                        let cc = regex.pop().unwrap();
-                        if cc != CONCAT_CHAR {
-                            regex.push(cc);
-                        }
-                        regex.push(UNION_CHAR);
-                        char_index += 1;
-                        continue;
-                    } else if c == '\'' {
-                        char_index += 1;
-                        regex.push(PARENTHESES_OPEN);
-                        if sentence.chars().nth(char_index).unwrap() == '\\' {
-                            char_index += 1;
-                        }
-                        regex.push(sentence.chars().nth(char_index).unwrap());
-                        regex.push(PARENTHESES_CLOSE);
-                        regex.push(CONCAT_CHAR);
-                        // skip the closing '\''
-                        char_index += 2;
-                    } else if c == '\"' {
-                        char_index += 1;
-                        regex.push(PARENTHESES_OPEN);
-                        while sentence.chars().nth(char_index).unwrap() != '\"' {
-                            regex.push_str(&format!(
-                                "{}{}",
-                                sentence.chars().nth(char_index).unwrap(),
-                                CONCAT_CHAR
-                            ));
-                            char_index += 1;
-                        }
-                        regex.pop();
-                        regex.push_str(&format!("{}{}", PARENTHESES_CLOSE, CONCAT_CHAR));
-                        char_index += 1;
-                        continue;
-                    } else if c.is_ascii_alphabetic() {
-                        let mut char_stack = String::new();
-                        let mut cc = sentence.chars().nth(char_index).unwrap();
-                        // grab the ident
-                        while cc.is_ascii_alphabetic() || cc.is_ascii_digit() {
-                            char_stack.push(sentence.chars().nth(char_index).unwrap());
-                            char_index += 1;
-                            cc = sentence.chars().nth(char_index).unwrap();
-                        }
-                        // search ident in cat table
-                        if cat_table.contains_key(&char_stack) {
-                            regex.push(/*'('*/ PARENTHESES_OPEN);
-                            for cc in &cat_table[&char_stack] {
-                                regex.push_str(&format!("{}{}", cc, UNION_CHAR));
-                            }
-                            regex.pop();
-                            regex.push(PARENTHESES_CLOSE);
-                            regex.push(CONCAT_CHAR);
-                        } else {
-                            println!("Error found while parsing TOKENS sections: token \"{}\" does not exist", char_stack);
-                            process::exit(-1);
-                        }
-                    } else if c == '.' {
-                        break;
-                    }
-                }
-                // add the final #
-                let last = regex.pop().unwrap();
-                if last == CONCAT_CHAR {
-                    regex.push_str(&format!("{}{}", CONCAT_CHAR, EXT_CHAR));
-                } else {
-                    regex.push_str(&format!("{}{}{}", last, CONCAT_CHAR, EXT_CHAR));
-                }
-                // close regex
-                regex.push(PARENTHESES_CLOSE);
-                tok_table.insert(String::from_str(tokens[0].trim()).unwrap(), regex.clone());
-                tokens_vec.push(CocolToken::new(
-                    String::from_str(tokens[0].trim()).unwrap(),
-                    regex,
-                ));
-            }
+        } else if section == 3 && tokens.len() > 1 {
+            parse_tokens_line(tokens, except_table, cat_table, tok_table, tokens_vec);
         } else if section == 4 {
             // PRODUCTIONS
         } else if section == 5 {
             if tokens[1] == grammar_name {
                 // println!("Cocol/R file parsed successfully.");
             }
+        } else if line.contains("IGNORE") {
+            parse_characters_line(line.splitn(2, ' ').collect(), cat_table, whitespace, true);
         }
     }
 }
@@ -1143,9 +1187,14 @@ fn main() {
     curr_state = 0;
                     states.clear();
                     curr_lexeme.clear();
+                } else {
+                    curr_lexeme.pop();
+                    curr_idx -= 1;
                 }
             }
         } else {
+            println!(\"Scanner: char {} is invalid.\", curr_char as char);
+            curr_state = 0;
             curr_idx += 1;
         }
     }
@@ -1221,7 +1270,15 @@ fn main() {
     println!("********************* TOKENS *************************");
     let mut regex = String::from(PARENTHESES_OPEN);
     for token in &tokens {
-        regex.push_str(&format!("{}|", token.regex));
+        // extend the current regular expression
+        let mut rregex = token.regex.clone();
+        let mut count = 1;
+        while rregex.chars().nth(rregex.len() - count).unwrap() == PARENTHESES_CLOSE {
+            count += 1;
+        }
+        rregex.insert(rregex.len() - count + 1, EXT_CHAR);
+        // append the current regex to the global regex with a UNION character.
+        regex.push_str(&format!("{}{}", rregex, UNION_CHAR));
         println!("* {:?}", token);
         if except_table.contains_key(&token.name) {
             println!("\tcontains EXCEPT KEYWORDS");
@@ -1236,7 +1293,7 @@ fn main() {
     regex.push(PARENTHESES_CLOSE);
     // replace '?' and '+' operators by the basic operators
     let proc_regex = preprocess_regex(&regex);
-    println!("{}", proc_regex);
+    // println!("{}", proc_regex);
     // create the alphabet using the symbols in the regex
     let mut letters = proc_regex.clone();
     letters.retain(|c| (is_valid_regex_symbol(&c) && c != EPSILON));
