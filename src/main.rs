@@ -14,7 +14,7 @@ const PARENTHESES_CLOSE: char = 16 as char;
 /// The character used as an explicit concatenation operator
 /// in the regular expressions.
 // const CONCAT_CHAR: char = 17 as char;
-// const KLEENE_CHAR: char = 18 as char;
+const KLEENE_CHAR: char = 18 as char;
 const POSITIVE_CHAR: char = 19 as char;
 // const UNION_CHAR: char = 20 as char;
 // const EXT_CHAR: char = 26 as char;
@@ -23,7 +23,7 @@ const OPTIONAL_CHAR: char = 22 as char;
 // const PARENTHESES_OPEN: char = '(';
 // const PARENTHESES_CLOSE: char = ')';
 const CONCAT_CHAR: char = '~';
-const KLEENE_CHAR: char = '*';
+// const KLEENE_CHAR: char = '*';
 // const POSITIVE_CHAR: char = '+';
 const UNION_CHAR: char = '|';
 const EXT_CHAR: char = '&';
@@ -864,15 +864,6 @@ fn parse_tokens_line(
                 }
                 regex.pop();
                 regex.push_str(&format!("{}{}", PARENTHESES_CLOSE, CONCAT_CHAR));
-            } else if tok_table.contains_key(&char_stack) {
-                // extend the current regular expression
-                let mut rregex = tok_table[&char_stack].clone();
-                let mut count = 1;
-                while rregex.chars().nth(rregex.len() - count).unwrap() != CONCAT_CHAR {
-                    count += 1;
-                }
-                rregex.remove(rregex.len() - count);
-                regex.push_str(&format!("{}{}", rregex.as_str(), CONCAT_CHAR));
             } else {
                 println!(
                     "Error found while parsing TOKENS sections: token \"{}\" does not exist",
