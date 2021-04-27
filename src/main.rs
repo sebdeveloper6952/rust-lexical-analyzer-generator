@@ -786,6 +786,12 @@ fn parse_tokens_line(
         sentence.push('.');
     }
 
+    // token declaration must end with '.'
+    if sentence.chars().nth(sentence.len() - 1).unwrap() != '.' {
+        println!("Error: a token declaration must end with '.'");
+        process::exit(-1);
+    }
+
     while char_index < sentence.chars().count() {
         let c = sentence.chars().nth(char_index).unwrap();
         if c == ' ' {
