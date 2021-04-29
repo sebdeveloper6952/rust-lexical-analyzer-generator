@@ -518,8 +518,6 @@ fn regex_dfa(
     let mut d_states_map: HashMap<Vec<u32>, u32> = HashMap::new();
     let mut unmarked: Vec<Vec<u32>> = Vec::new();
     let mut curr_state = 0;
-
-    // TODO think of better implementation
     let mut hashtag_positions: Vec<u32> = s_table[&EXT_CHAR].clone().into_iter().collect();
     hashtag_positions.sort();
 
@@ -588,6 +586,15 @@ fn regex_dfa(
                     d_acc_states.push(state_num);
                     let mut inter_vec: Vec<u32> = intersection.into_iter().map(|a| *a).collect();
                     inter_vec.sort();
+                    // hashtag_positions holds all the positions that the '#' character
+                    // occupies on our regex tree. Here we obtain the index of this position.
+                    // For example, if the index obtained is 1, it means that this '#' marks
+                    // the end of the second regular expression. This index is then used to
+                    // indicate that this '#' belongs to the second token parsed from the
+                    // CoCol file from the TOKENS section. In this way, we know that the state
+                    // `state_num` is an accepting state and is associated with the second
+                    // token.    primer '#' => parseando primer token
+                    // 5 => 'ident'
                     let hash_pos = hashtag_positions
                         .iter()
                         .position(|&a| a == inter_vec[0])
@@ -1199,9 +1206,11 @@ fn main() {
             curr_idx += 1;
         }
     }
-    for token in found_tokens {
+    for token in &found_tokens {
         println!(\"{:?}\", token);
     }
+
+    println!(\"\n* Scanner found {} tokens. *\", found_tokens.len());
 }
     ",
     );

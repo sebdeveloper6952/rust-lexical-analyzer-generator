@@ -19,6 +19,8 @@ KEYWORDS
 
 while = "while".
 do = "do".
+if = "if".
+switch = "switch"
 
 TOKENS
 
