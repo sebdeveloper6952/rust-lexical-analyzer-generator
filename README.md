@@ -14,7 +14,7 @@
 
 1. cd into the `rust-lexical-analyzer-generator` directory.
 2. run the following command to create the project executable: `cargo build --release`
-3. run the project executable with an input grammar file: `./target/release/rust-lexical-analyzer-generator ./pruebas/CoCol.ATG`
+3. run the project executable with an input grammar file: `./target/release/rust-lexical-analyzer ./pruebas/CoCol.ATG`
 4. compile the generated lexical analyzer: `rustc -O ./rust-lex.rs`
 5. run the lexical analyzer with an input file: `./rust-lex ./pruebas/CoCol.ATG`
 
