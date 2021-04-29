@@ -5,7 +5,7 @@
 <https://youtu.be/0XQtm6eh_xE>
 
 ### Prerequisites
-- Rust <>
+- Rust <https://www.rust-lang.org/tools/install>
 
 ### To Begin
 - clone or download the whole repository (<https://github.com/sebdeveloper6952/rust-lexical-analyzer-generator>)
