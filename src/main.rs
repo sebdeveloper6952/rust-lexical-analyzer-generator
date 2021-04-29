@@ -1185,12 +1185,16 @@ fn main() {
                     states.clear();
                     curr_lexeme.clear();
                 } else {
-                    curr_lexeme.pop();
-                    curr_idx -= 1;
+                    if states.is_empty() {
+                        curr_state = 0;
+                        curr_lexeme.clear();
+                    } else {
+                        curr_lexeme.pop();
+                        curr_idx -= 1;
+                    }
                 }
             }
         } else {
-            println!(\"Scanner: char {} is invalid.\", curr_char as char);
             curr_state = 0;
             curr_idx += 1;
         }
